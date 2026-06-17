@@ -1,0 +1,33 @@
+__pycache__/
+.env/
+.venv/
+env/
+build/
+dist/
+*.egg-info/
+*.egg
+*.DS_Store
+
+# Model weights (large binaries)
+*.pt
+*.pth
+
+# Example images
+1.jpg
+2.jpg
+3.jpg
+*.jpg
+*.jpeg
+*.png
+
+# Uploads and results
+uploads/
+results/
+logs/
+cache/
+exports/
+
+# Archives
+*.rar
+*.zip
+nul

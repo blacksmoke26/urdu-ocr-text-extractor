@@ -1,0 +1,22 @@
+# ── Core web server (v2 API) ────────────────────────────────────
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6            # File upload parsing
+jinja2>=3.1.2                      # FastAPI templates / docs
+python-dotenv>=1.0.0               # .env configuration loading
+
+# ── OCR pipeline (model inference & image processing) ───────────
+torch>=2.0.0                       # Deep learning runtime
+ultralytics>=8.0.0                 # YOLOv8 object detection
+numpy>=1.26.0,<2.0                 # Array operations, confidence stats (PyMuPDF needs <2)
+Pillow>=10.0.0                     # Image I/O, preprocessing
+
+# ── PDF handling ────────────────────────────────────────────────
+PyMuPDF>=1.23.0                      # pip install pymupdf (lowercase on PyPI)
+
+# ── Urdu/Arabic text cleaning ───────────────────────────────────
+arabic-reshaper>=3.0.0             # Arabic script reshaping
+PyArabic>=0.6.0                    # Arabic character normalization
+
+# ── Export (optional — python-docx only needed for DOCX export) ─
+python-docx>=0.8.11                # .docx document generation (optional, install via install_deps.py)
