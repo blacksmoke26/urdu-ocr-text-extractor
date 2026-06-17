@@ -4,67 +4,58 @@
  * @see https://github.com/blacksmoke26
  */
 
-/**
- * App Shell — Tab-based navigation connecting all pages.
- *
- * Layout:
- *   Header (brand + tab bar + theme toggle + connection indicator)
- *   Content area (switches between page components via activeTab state)
- *   Footer
- */
-
-import {useState, useEffect} from 'react';
+import {useEffect, useState} from 'react';
 import client from '#/utils/apiClient';
-import {ThemeProvider} from '#/context/ThemeContext';
+import {ThemeProvider, useTheme} from '#/context/ThemeContext';
 import {ToastProvider} from '#/context/ToastContext';
-import {useTheme} from '#/context/ThemeContext';
 import {OcrPage} from '#/pages/OcrPage';
 import {PdfPage} from '#/pages/PdfPage';
 import {SystemPage} from '#/pages/SystemPage';
 import {StatsPage} from '#/pages/StatsPage';
 import {ExportPage} from '#/pages/ExportPage';
-import {ScanLine, FileText, Settings2, BarChart3, Download, Sun, Moon} from 'lucide-react';
-import type { OcrResult, PdfOcrResponse } from '#/types/api';
+import {
+  Activity,
+  BarChart3,
+  Cpu,
+  Download,
+  FileText,
+  Globe,
+  Moon,
+  ScanLine,
+  Settings2,
+  Shield,
+  Sun,
+  TrendingUp,
+  UploadCloud,
+  Zap,
+} from 'lucide-react';
+import type {OcrResult, PdfOcrResponse} from '#/types/api';
 
-/** Navigation tab definitions. */
-const TABS = [
-  {key: 'ocr', label: 'OCR', icon: ScanLine},
-  {key: 'pdf', label: 'PDF', icon: FileText},
-  {key: 'system', label: 'System', icon: Settings2},
-  {key: 'stats', label: 'Stats', icon: BarChart3},
-  {key: 'export', label: 'Export', icon: Download},
+type TabKey = 'ocr' | 'pdf' | 'stats' | 'system' | 'export';
+
+const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { key: 'ocr',     label: 'OCR',      icon: UploadCloud },
+  { key: 'pdf',     label: 'PDF OCR',   icon: FileText },
+  { key: 'stats',   label: 'Analytics', icon: BarChart3 },
+  { key: 'system',  label: 'System',    icon: Settings2 },
+  { key: 'export',  label: 'Export',    icon: Download },
 ];
 
-type TabKey = (typeof TABS)[number]['key'];
+const QUICK_STATS = [
+  { label: 'Requests',   value: '1.2K',  icon: Zap,     color: 'text-violet-400', glow: 'glow-violet' },
+  { label: 'OCR RPS',    value: '8.4',    icon: TrendingUp, color: 'text-emerald-400', glow: 'glow-emerald' },
+  { label: 'GPU Load',   value: '62%',    icon: Cpu,     color: 'text-blue-400', glow: 'glow-blue' },
+  { label: 'Uptime',     value: '99.9%',  icon: Activity, color: 'text-amber-400', glow: '' },
+];
 
-/** Theme toggle button using the existing ThemeContext. */
-function ThemeToggle() {
-  const {theme, toggleTheme} = useTheme();
-  return (
-    <button
-      onClick={toggleTheme}
-      className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
-      title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-    >
-      {theme === 'dark'
-        ? <Sun className="h-5 w-5 text-amber-400"/>
-        : <Moon className="h-5 w-5 text-gray-600"/>
-      }
-    </button>
-  );
-}
-
-/** Main shell component with tab navigation. */
 function Shell() {
   const [activeTab, setActiveTab] = useState<TabKey>('ocr');
-  const {theme} = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const [connected, setConnected] = useState(true);
-
-  // Share last OCR result across tabs via module-level state
   const [lastOcrResult, setLastOcrResult] = useState<OcrResult | null>(null);
   const [lastPdfOcrResult, setLastPdfOcrResult] = useState<PdfOcrResponse | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
 
-  // Health ping on mount via fetch (lightweight one-off check)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -75,70 +66,201 @@ function Shell() {
         if (!cancelled) setConnected(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    // Trigger entrance animation
+    setTimeout(() => setIsLoaded(true), 50);
+    return () => { cancelled = true; };
   }, []);
 
-  return (
-    <div
-      className={`min-h-screen flex flex-col ${theme === 'dark' ? 'dark bg-[#0b0f19] text-gray-200' : 'bg-[#f8f9fc] text-gray-900'}`}>
-      {/* ── Header ─────────────────────────────────────── */}
-      <header
-        className="sticky top-0 z-40 border-b border-gray-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-          {/* Brand */}
-          <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 shrink-0">
-            <ScanLine className="h-5 w-5 text-violet-600"/>
-            Urdu OCR{' '}
-            <span
-              className="text-xs font-normal text-violet-500 bg-violet-100 dark:bg-violet-900/30 dark:text-violet-400 rounded-full px-2 py-0.5">v2</span>
-          </h1>
+  const isDark = theme === 'dark';
 
-          {/* Tab bar — hidden on very small screens */}
-          <nav className="flex gap-1 bg-gray-100 dark:bg-slate-800 rounded-xl p-1 overflow-x-auto flex-1 max-w-[600px]">
-            {TABS.map(({key, label, icon: Icon}) => (
+  return (
+    <div className={`min-h-screen flex ${isDark ? 'bg-[#0b0f19] text-gray-200' : 'bg-[#f1f5f9] text-gray-900'}`}>
+
+      {/* ── Sidebar ─────────────────────────────── */}
+      <aside className={`w-16 lg:w-64 flex flex-col border-r transition-all duration-300 ${
+        isDark ? 'border-slate-800/40 bg-[#080b13]' : 'border-gray-200 bg-white'
+      }`}>
+
+        {/* Logo */}
+        <div className={`p-3 lg:p-4 flex items-center gap-3 border-b ${
+          isDark ? 'border-slate-800/40' : 'border-gray-200'
+        }`}>
+          <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-600 flex items-center justify-center shrink-0 shadow-lg shadow-violet-500/30 ring-1 ring-white/10">
+            <ScanLine className="h-[18px] w-[18px] text-white" strokeWidth={2.5} />
+          </div>
+          <div className="hidden lg:block overflow-hidden">
+            <h1 className={`text-sm font-bold tracking-tight ${isDark ? 'text-white' : 'text-gray-900'}`}>Urdu OCR</h1>
+            <p className={`text-[10px] font-medium ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>v2.0 · AI-Powered</p>
+          </div>
+        </div>
+
+        {/* Nav */}
+        <nav className="flex-1 px-2.5 py-3 space-y-0.5">
+          {TABS.map(({ key, label, icon: Icon }) => {
+            const isActive = activeTab === key;
+            return (
               <button
                 key={key}
                 onClick={() => setActiveTab(key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
-                  activeTab === key
-                    ? 'bg-white dark:bg-slate-700 shadow-sm text-violet-600 dark:text-violet-400'
-                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                className={`w-full flex items-center gap-3 rounded-lg transition-all duration-200 relative group ${
+                  isActive
+                    ? isDark
+                      ? 'bg-violet-500/10 text-violet-400'
+                      : 'bg-violet-50 text-violet-600'
+                    : isDark
+                      ? 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                      : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100/70'
                 }`}
               >
-                <Icon className="h-4 w-4 shrink-0"/>
-                {label}
+                {/* Active indicator bar */}
+                {isActive && (
+                  <div className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-violet-500"
+                    style={{ boxShadow: '0 0 8px rgba(139, 92, 246, 0.5)' }}
+                  />
+                )}
+                {/* Icon container */}
+                <div className={`relative shrink-0 p-2 rounded-lg transition-all duration-200 ${
+                  isActive
+                    ? isDark
+                      ? 'bg-violet-500/15 text-violet-400'
+                      : 'bg-violet-100/70 text-violet-600'
+                    : ''
+                }`}>
+                  <Icon className="h-[16px] w-[16px] lg:h-4 lg:w-4" />
+                  {/* Subtle glow on active */}
+                  {isActive && (
+                    <div className={`absolute inset-0 rounded-lg blur-sm ${
+                      isDark ? 'bg-violet-500/20' : 'bg-violet-300/20'
+                    } opacity-60`} />
+                  )}
+                </div>
+                {/* Label */}
+                <span className={`hidden lg:block text-sm font-medium tracking-tight`}>{label}</span>
               </button>
-            ))}
-          </nav>
+            );
+          })}
+        </nav>
 
-          {/* Right controls */}
-          <div className="flex items-center gap-2 shrink-0">
-            <span
-              className={`inline-block h-2.5 w-2.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-red-500'}`}
-              title={connected ? 'Connected' : 'Offline'}
-            />
-            <ThemeToggle/>
+        {/* Divider */}
+        <div className={`mx-3 border-t ${isDark ? 'border-slate-800/40' : 'border-gray-200'}`} />
+
+        {/* Bottom section */}
+        <div className="px-2.5 py-2 space-y-0.5">
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            className={`w-full flex items-center gap-3 rounded-lg px-2.5 py-2 transition-all duration-200 ${
+              isDark ? 'text-slate-400 hover:text-white hover:bg-white/[0.04]' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100/70'
+            }`}
+            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            <div className="shrink-0 p-2 rounded-lg">
+              {isDark
+                ? <Sun className="h-[16px] w-[16px] lg:h-4 lg:w-4" strokeWidth={2} />
+                : <Moon className="h-[16px] w-[16px] lg:h-4 lg:w-4" strokeWidth={2} />
+              }
+            </div>
+            <span className="hidden lg:block text-sm font-medium tracking-tight">
+              {isDark ? 'Light Mode' : 'Dark Mode'}
+            </span>
+          </button>
+
+          {/* Connection status */}
+          <div className={`flex items-center gap-2 px-2.5 py-2 rounded-lg ${
+            isDark ? 'text-slate-500' : 'text-gray-400'
+          }`}>
+            <div className="relative shrink-0">
+              {connected ? (
+                <>
+                  <span className="inline-flex h-[6px] w-[6px] rounded-full bg-emerald-400/80" />
+                  <span className="absolute inset-0 -m-[1px] inline-flex rounded-full bg-emerald-400/30 animate-ping" style={{ animationDuration: '3s' }} />
+                </>
+              ) : (
+                <span className="inline-flex h-[6px] w-[6px] rounded-full bg-red-400/80" />
+              )}
+            </div>
+            <span className={`hidden lg:block text-xs font-medium ${
+              isDark ? 'text-slate-500' : 'text-gray-400'
+            }`}>Connected</span>
           </div>
         </div>
-      </header>
+      </aside>
 
-      {/* ── Content ────────────────────────────────────── */}
-      <main className="flex-1 p-4 sm:p-6">
-        {activeTab === 'ocr' && <OcrPage onResult={setLastOcrResult}/>}
-        {activeTab === 'pdf'    && <PdfPage onPdfResult={setLastPdfOcrResult} />}
-        {activeTab === 'system' && <SystemPage/>}
-        {activeTab === 'stats' && <StatsPage/>}
-        {activeTab === 'export' && <ExportPage ocrResult={lastOcrResult} pdfOcrResult={lastPdfOcrResult} />}
+      {/* ── Main Content ───────────────────────────── */}
+      <main className="flex-1 flex flex-col min-w-0">
+
+        {/* Top bar */}
+        <header className={`sticky top-0 z-30 border-b backdrop-blur-xl ${
+          isDark ? 'border-slate-800/40 bg-[#0b0f19]/70' : 'border-gray-200/60 bg-white/70'
+        }`}>
+          <div className="px-6 lg:px-8 py-4 flex items-center justify-between">
+            <div>
+              <h2 className={`text-lg font-semibold tracking-tight ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                {TABS.find(t => t.key === activeTab)?.label}
+              </h2>
+              <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
+                {activeTab === 'ocr' && 'Upload an image to extract Urdu text'}
+                {activeTab === 'pdf' && 'Process PDF documents for OCR'}
+                {activeTab === 'stats' && 'Real-time server performance metrics'}
+                {activeTab === 'system' && 'Server health and configuration'}
+                {activeTab === 'export' && 'Export extracted data in multiple formats'}
+              </p>
+            </div>
+
+            {/* Quick stats pills */}
+            <div className="hidden xl:flex items-center gap-3">
+              {QUICK_STATS.map(({ label, value, icon: Icon, color }) => (
+                <div key={label} className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs ${
+                  isDark ? 'bg-white/5' : 'bg-gray-100'
+                }`}>
+                  <Icon className={`h-3 w-3 ${color}`} />
+                  <span className={`${isDark ? 'text-slate-400' : 'text-gray-500'}`}>{label}:</span>
+                  <span className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </header>
+
+        {/* Page content */}
+        <div className={`flex-1 p-6 lg:p-8 overflow-auto ${isLoaded ? '' : 'opacity-0'}`}>
+          {activeTab === 'ocr'  && <OcrPage onResult={setLastOcrResult} />}
+          {activeTab === 'pdf'  && <PdfPage onPdfResult={setLastPdfOcrResult} />}
+          {activeTab === 'system' && <SystemPage />}
+          {activeTab === 'stats' && <StatsPage />}
+          {activeTab === 'export' && <ExportPage ocrResult={lastOcrResult} pdfOcrResult={lastPdfOcrResult} />}
+        </div>
+
+        {/* Footer */}
+        <footer className={`border-t px-8 py-3 ${isDark ? 'border-slate-800/40' : 'border-gray-200'}`}>
+          <div className="flex items-center justify-between">
+            <p className={`text-[11px] ${isDark ? 'text-slate-600' : 'text-gray-400'}`}>
+              End-to-End Urdu OCR WebApp · FastAPI Backend · React + TypeScript
+            </p>
+            <div className="flex items-center gap-3">
+              <span className={`inline-flex items-center gap-1.5 text-[11px] ${isDark ? 'text-slate-600' : 'text-gray-400'}`}>
+                <Shield className="h-3 w-3" /> Secure
+              </span>
+              <span className={`inline-flex items-center gap-1.5 text-[11px] ${isDark ? 'text-slate-600' : 'text-gray-400'}`}>
+                <Globe className="h-3 w-3" /> FastAPI
+              </span>
+            </div>
+          </div>
+        </footer>
       </main>
 
-      {/* ── Footer ─────────────────────────────────────── */}
-      <footer className="border-t border-gray-200 dark:border-slate-800 py-3">
-        <p className="text-center text-xs text-gray-400">
-          End-to-End Urdu OCR WebApp &middot; FastAPI v2 Backend &middot; React + TypeScript + Tailwind CSS
-        </p>
-      </footer>
+      {/* ── Welcome Overlay (first load) ─────────── */}
+      {!isLoaded && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b0f19]">
+          <div className="text-center animate-fade-in">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center mx-auto mb-4 shadow-xl shadow-violet-500/30">
+              <ScanLine className="h-8 w-8 text-white" />
+            </div>
+            <h2 className="text-xl font-bold gradient-text">Urdu OCR</h2>
+            <p className={`text-sm mt-1 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>Loading interface…</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -147,7 +269,7 @@ function App() {
   return (
     <ThemeProvider>
       <ToastProvider>
-        <Shell/>
+        <Shell />
       </ToastProvider>
     </ThemeProvider>
   );

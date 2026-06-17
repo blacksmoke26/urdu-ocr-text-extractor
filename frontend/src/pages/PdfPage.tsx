@@ -11,18 +11,17 @@
  * Each tab uses the appropriate v2 API endpoint via axios.
  */
 
-import {useRef, useState} from 'react';
-import {Clock, FileText, Scissors, Search, Square, Timer} from 'lucide-react';
-import {cancelPdfOcr, pdfExtract, pdfInfo, pdfOcr} from '#/utils/api/pdf';
-import {Card} from '#/components/ui/Card';
-import {Button} from '#/components/ui/Button';
-import {Badge} from '#/components/ui/Badge';
-import {ProgressBar} from '#/components/ui/ProgressBar';
-import {Dialog, DialogBody, DialogContent} from '#/components/ui/Dialog';
-import {useToast} from '#/context/ToastContext';
+import { useRef, useState } from 'react';
+import { Clock, FileText, Scissors, Search, Square, Timer, UploadCloud, Eye, FileJson } from 'lucide-react';
+import { cancelPdfOcr, pdfExtract, pdfInfo, pdfOcr } from '#/utils/api/pdf';
+import { Dialog, DialogBody, DialogContent } from '#/components/ui/Dialog';
+import { useToast } from '#/context/ToastContext';
+import { formatBytes } from '#/utils/file';
 import type {PdfExtractResponse, PdfInfo, PdfOcrPageResult, PdfOcrResponse} from '#/types/api';
 
 type PdfTab = 'info' | 'extract' | 'ocr';
+
+const isDark = true;
 
 export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse) => void }) {
   const [tab, setTab] = useState<PdfTab>('info');
@@ -312,10 +311,10 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
     return `~${formatMs(seconds * 1000)} remaining`;
   };
 
-  const tabs: { key: PdfTab; label: string; icon: React.ReactNode }[] = [
-    { key: 'info', label: 'Info', icon: <Search className="h-4 w-4" /> },
-    { key: 'extract', label: 'Extract Pages', icon: <Scissors className="h-4 w-4" /> },
-    { key: 'ocr', label: 'PDF OCR', icon: <FileText className="h-4 w-4" /> },
+  const tabs: { key: PdfTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+    { key: 'info',     label: 'Info',       icon: Search },
+    { key: 'extract',  label: 'Extract',    icon: Scissors },
+    { key: 'ocr',      label: 'PDF OCR',    icon: FileText },
   ];
 
   /* ── Render helpers ───────────────────────────────────── */
@@ -332,9 +331,9 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
         ['Producer', info.producer ?? '—'],
         ['Page Size', info.page_size ? `${info.page_size[0]} × ${info.page_size[1]}` : '—'],
       ].map(([label, value]) => (
-        <div key={label} className="flex justify-between border-b border-gray-100 dark:border-slate-800 py-2">
-          <span className="text-gray-500 font-medium">{label}</span>
-          <span className="rtl text-right max-w-[60%] truncate text-gray-900 dark:text-gray-100">{value}</span>
+        <div key={label} className="flex justify-between items-center py-2.5 border-b border-slate-800/40">
+          <span className={`text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>{label}</span>
+          <span className={`text-sm truncate text-right max-w-[60%] font-medium ${isDark ? 'text-slate-200' : 'text-gray-900'}`}>{value}</span>
         </div>
       ))}
     </div>
@@ -443,15 +442,19 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
     const pages = data.pages ?? [];
     return (
       <div className="space-y-4">
-        <p className="text-sm text-gray-500">{data.total_pages} pages · {data.total_text_lines} lines</p>
+        <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>{data.total_pages} pages · {data.total_text_lines} lines</p>
         {pages.map((pg: PdfOcrPageResult, i: number) => {
           const confMean = pg.confidence_stats?.mean ?? 0;
           return (
-            <Card key={i} title={`Page ${pg.page_number}`} description={`${pg.detected_lines} lines · ${Math.round(confMean * 100)}% confidence`}>
-              <div className="rtl text-right border rounded-lg px-4 py-3 bg-gray-50 dark:bg-slate-900/50 leading-loose" dir="rtl">
-                {pg.full_text || <span className="text-gray-400 italic">No text.</span>}
+            <div key={i} className="glass-card rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Page {pg.page_number}</h4>
+                <span className={`text-xs px-2 py-0.5 rounded-md font-medium ${confMean >= 0.7 ? 'bg-emerald-500/10 text-emerald-400' : confMean >= 0.4 ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>{Math.round(confMean * 100)}% confidence · {pg.detected_lines} lines</span>
               </div>
-            </Card>
+              <div className={`rounded-xl px-4 py-3 border leading-loose ${isDark ? 'bg-white/[0.02] border-slate-700/60' : 'bg-gray-50 border-gray-200'}`}>
+                <span className={`rtl text-right ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>{pg.full_text || <span className={`${isDark ? 'text-slate-600' : 'text-gray-400'} italic`}>No text.</span>}</span>
+              </div>
+            </div>
           );
         })}
       </div>
@@ -460,8 +463,30 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      {/* Upload Zone */}
-      <Card title="Upload PDF" description="Drop a PDF or click to select. All operations are per-file.">
+      {/* ── Hero Section ─────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl border border-blue-500/10 bg-gradient-to-br from-blue-500/5 via-transparent to-cyan-500/5">
+        <div className="absolute inset-0 bg-grid opacity-30" />
+        <div className="relative px-6 py-8 sm:px-10 sm:py-12 text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-blue-500/20 bg-blue-500/10 text-blue-400 text-xs font-medium mb-4">
+            <FileText className="h-3 w-3" /> PDF Processing Suite
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-2">
+            Extract Text from <span className="gradient-text">PDF Documents</span>
+          </h2>
+          <p className={`text-sm max-w-md mx-auto ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+            Upload PDF files for metadata inspection, page extraction, or full OCR processing.
+          </p>
+        </div>
+      </div>
+
+      {/* ── Upload Zone ─────────────────────── */}
+      <div className="glass-card rounded-2xl p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <FileText className={`h-5 w-5 ${isDark ? 'text-slate-300' : 'text-gray-600'}`} />
+          <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Upload PDF</h3>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700/50 text-slate-400' : 'bg-gray-100 text-gray-500'}`}>PDF Only</span>
+        </div>
+
         <input
           type="file"
           accept=".pdf"
@@ -469,137 +494,156 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
           id="pdf-input"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
         />
-        <label htmlFor="pdf-input" className="block cursor-pointer border-2 border-dashed rounded-xl p-8 text-center transition-colors hover:border-violet-400">
+        <label htmlFor="pdf-input" className={`block cursor-pointer border-2 border-dashed rounded-xl p-8 sm:p-12 text-center transition-all duration-300 ${
+          file
+            ? 'border-blue-500/40 bg-blue-500/5'
+            : isDark
+              ? 'border-slate-700/60 hover:border-blue-500/30 hover:bg-white/[0.02]'
+              : 'border-gray-200 hover:border-blue-400/40 hover:bg-blue-50/30'
+        }`}>
           {file ? (
-            <div className="space-y-2">
-              <FileText className="h-10 w-10 mx-auto text-violet-500" />
-              <p className="text-sm font-medium">{file.name}</p>
-              <Badge variant="info" label="PDF Selected" />
+            <div className="space-y-3">
+              <div className={`w-16 h-16 rounded-2xl mx-auto flex items-center justify-center ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+                <FileText className="h-8 w-8 text-red-400" />
+              </div>
+              <div className={`inline-flex items-center gap-2 text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                {file.name} · {formatBytes(file.size)}
+              </div>
             </div>
           ) : (
-            <div className="space-y-2">
-              <FileText className="h-10 w-10 mx-auto text-gray-400 dark:text-gray-500" />
-              <p className="text-sm text-gray-500 dark:text-gray-400">Drop PDF here or click to select</p>
+            <div className="space-y-3">
+              <div className={`w-16 h-16 rounded-2xl mx-auto flex items-center justify-center ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+                <UploadCloud className={`h-8 w-8 ${isDark ? 'text-slate-500' : 'text-gray-400'}`} />
+              </div>
+              <div>
+                <p className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>Drop PDF here or click to select</p>
+                <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>Maximum file size: 500MB</p>
+              </div>
             </div>
           )}
         </label>
-      </Card>
+      </div>
 
-      {/* Tabs */}
+      {/* ── Tabs + Controls ─────────────────── */}
       {file && (
         <>
-          <div className="flex gap-1 border-b border-gray-200 dark:border-slate-700">
-            {tabs.map((t) => (
+          {/* Tab bar */}
+          <div className={`flex gap-1 p-1 rounded-xl ${isDark ? 'bg-white/5 border border-slate-800/40' : 'bg-gray-100 border border-gray-200'}`}>
+            {tabs.map(({ key, label, icon: TabIcon }) => (
               <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  tab === t.key
-                    ? 'border-violet-600 text-violet-600 dark:text-violet-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                key={key}
+                onClick={() => setTab(key)}
+                className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                  tab === key
+                    ? isDark
+                      ? 'bg-violet-500/20 text-violet-400 shadow-sm'
+                      : 'bg-white text-violet-600 shadow-sm'
+                    : isDark
+                      ? 'text-slate-500 hover:text-slate-300'
+                      : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
-                {t.icon} {t.label}
+                <TabIcon className="h-4 w-4" /> {label}
               </button>
             ))}
           </div>
 
-          {/* Page range (for extract + OCR) */}
+          {/* Page range */}
           {(tab === 'extract' || tab === 'ocr') && (
-            <Card>
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-gray-500">From page:</span>
-                <input type="number" min={1} value={pageRange.from} onChange={(e) => setPageRange((p) => ({ ...p, from: Number(e.target.value) }))} className="w-20 border rounded-lg px-3 py-1.5 dark:bg-slate-800 dark:border-slate-700" />
-                <span className="text-gray-500">To page:</span>
-                <input type="number" min={1} value={pageRange.to || ''} onChange={(e) => setPageRange((p) => ({ ...p, to: e.target.value }))} placeholder="All" className="w-20 border rounded-lg px-3 py-1.5 dark:bg-slate-800 dark:border-slate-700" />
+            <div className="glass-card rounded-2xl p-5">
+              <div className={`text-xs font-medium uppercase tracking-wider mb-3 ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>Page Range</div>
+              <div className="flex items-center gap-3 text-sm">
+                <span className={isDark ? 'text-slate-400' : 'text-gray-600'}>From:</span>
+                <input type="number" min={1} value={pageRange.from} onChange={(e) => setPageRange((p) => ({ ...p, from: Number(e.target.value) }))} className={`w-20 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
+                <span className={isDark ? 'text-slate-400' : 'text-gray-600'}>To:</span>
+                <input type="number" min={1} value={pageRange.to || ''} onChange={(e) => setPageRange((p) => ({ ...p, to: e.target.value }))} placeholder="All" className={`w-20 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
+                <span className={`text-xs ${isDark ? 'text-slate-600' : 'text-gray-400'}`}>Leave blank for all pages</span>
               </div>
-            </Card>
+            </div>
           )}
 
-          {/* OCR-specific options */}
+          {/* OCR options */}
           {tab === 'ocr' && (
-            <Card>
-              <div className="flex flex-wrap gap-4 text-sm">
+            <div className="glass-card rounded-2xl p-5">
+              <div className={`text-xs font-medium uppercase tracking-wider mb-3 ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>OCR Settings</div>
+              <div className="flex flex-wrap gap-6 text-sm">
                 <div>
-                  <label className="text-gray-500 block mb-1">Confidence Threshold</label>
-                  <input type="number" step={0.1} min={0} max={1} value={confThreshold} onChange={(e) => setConfThreshold(Number(e.target.value))} className="w-24 border rounded-lg px-3 py-1.5 dark:bg-slate-800 dark:border-slate-700" />
+                  <label className={`block mb-2 text-xs ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Confidence Threshold</label>
+                  <input type="number" step={0.1} min={0} max={1} value={confThreshold} onChange={(e) => setConfThreshold(Number(e.target.value))} className={`w-24 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
                 </div>
                 <div>
-                  <label className="text-gray-500 block mb-1">Image Size</label>
-                  <input type="number" value={imgSize} onChange={(e) => setImgSize(Number(e.target.value))} className="w-24 border rounded-lg px-3 py-1.5 dark:bg-slate-800 dark:border-slate-700" />
+                  <label className={`block mb-2 text-xs ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Image Size</label>
+                  <input type="number" value={imgSize} onChange={(e) => setImgSize(Number(e.target.value))} className={`w-24 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
                 </div>
-                <label className="flex items-center gap-2 text-gray-700 dark:text-gray-300 cursor-pointer pt-5">
-                  <input type="checkbox" checked={textCleaning} onChange={() => setTextCleaning(!textCleaning)} className="accent-violet-600" />
-                  Text Cleaning
+                <label className="flex items-center gap-2 cursor-pointer pt-1">
+                  <div className={`relative w-9 h-5 rounded-full transition-colors ${textCleaning ? 'bg-violet-500' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`}>
+                    <input type="checkbox" checked={textCleaning} onChange={() => setTextCleaning(!textCleaning)} className="sr-only peer" />
+                    <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${textCleaning ? 'translate-x-4' : ''}`} />
+                  </div>
+                  <span className={isDark ? 'text-slate-300' : 'text-gray-700'}>Text Cleaning</span>
                 </label>
               </div>
-            </Card>
+            </div>
           )}
 
-          {/* Action button */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-3">
-              <Button onClick={() => {
-                if (tab === 'info') onInfo();
-                else if (tab === 'extract') onExtract();
-                else onPdfOcr();
-              }} disabled={!file || loading} loading={loading}>
-                {loading ? 'Processing…' : tab === 'info' ? 'Get PDF Info' : tab === 'extract' ? 'Extract Pages' : 'Run OCR'}
-              </Button>
+          {/* Action buttons */}
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={() => {
+                  if (tab === 'info') onInfo();
+                  else if (tab === 'extract') onExtract();
+                  else onPdfOcr();
+                }}
+                disabled={!file || loading}
+                className={`inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
+                  file && !loading
+                    ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:scale-[1.02]'
+                    : isDark ? 'bg-slate-800 text-slate-500' : 'bg-gray-200 text-gray-400'
+                } disabled:cursor-not-allowed`}
+              >
+                {loading ? <><span className="animate-spin">⟳</span> Processing…</> : tab === 'info' ? 'Get Info' : tab === 'extract' ? 'Extract Pages' : 'Run OCR'}
+              </button>
 
-              {/* Stop button — visible during any active processing */}
               {loading && (
-                <Button
-                  variant="destructive"
+                <button
                   onClick={onStop}
-                  className="flex items-center gap-1.5"
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-all"
                 >
-                  <Square className="h-4 w-4" />
-                  Stop
-                </Button>
+                  <Square className="h-3.5 w-3.5" /> Stop
+                </button>
               )}
             </div>
 
-            {/* Progress indicator */}
+            {/* Progress */}
             {loading && (tab === 'ocr' || tab === 'extract') && (
-              <div className="space-y-2">
-                {/* Progress bar — only show real progress from backend, otherwise 0% */}
-                <ProgressBar
-                  value={progressTotalPages > 1 ? Math.min(100, (pagesCompleted / progressTotalPages) * 100) : 0}
-                  label={`${pagesCompleted} / ${progressTotalPages > 1 ? progressTotalPages : pageRange.to || '?'} pages`}
-                />
-
-                {/* Detailed stats */}
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5" />
-                    Elapsed: {formatMs(elapsedMs)}
-                  </span>
+              <div className={`p-4 rounded-xl ${isDark ? 'bg-white/[0.02]' : 'bg-gray-50'}`}>
+                <div className={`h-2 rounded-full overflow-hidden mb-3 ${isDark ? 'bg-slate-800' : 'bg-gray-200'}`}>
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-500"
+                    style={{ width: `${progressTotalPages > 1 ? Math.min(100, (pagesCompleted / progressTotalPages) * 100) : 0}%` }}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+                  <span className={isDark ? 'text-slate-400' : 'text-gray-500'}>Elapsed: {formatMs(elapsedMs)}</span>
                   {progressTotalPages > 1 && lastPageTimeMs > 0 && (
-                    <span className="flex items-center gap-1">
-                      <Timer className="h-3.5 w-3.5" />
-                      ETA: {formatEta(((progressTotalPages - pagesCompleted) * lastPageTimeMs) / 1000)}
-                    </span>
+                    <span className={isDark ? 'text-slate-400' : 'text-gray-500'}>ETA: {formatEta(((progressTotalPages - pagesCompleted) * lastPageTimeMs) / 1000)}</span>
                   )}
-                  <span className="flex items-center gap-1">
+                  <span className={isDark ? 'text-slate-300 font-medium' : 'text-gray-700 font-medium'}>
                     {progressTotalPages > 1 && pagesCompleted > 0
                       ? `Page ${Math.min(pagesCompleted + 1, progressTotalPages)} of ${progressTotalPages}`
-                      : progressTotalPages > 1
-                        ? `${pagesCompleted} page${pagesCompleted >= 0 ? 's' : ''} done`
-                        : 'Waiting for data...'}
+                      : `${pagesCompleted} page${pagesCompleted >= 0 ? 's' : ''} done`}
                   </span>
-                  {lastPageTimeMs > 0 && (
-                    <span className="flex items-center gap-1">
-                      ~{Math.round(lastPageTimeMs)}ms/page
-                    </span>
-                  )}
+                  {lastPageTimeMs > 0 && <span className={isDark ? 'text-slate-400' : 'text-gray-500'}>~{Math.round(lastPageTimeMs)}ms/page</span>}
                 </div>
               </div>
             )}
 
-            {/* Progress bar */}
             {progress > 0 && progress < 100 && (
-              <ProgressBar value={progress} label="Upload progress" />
+              <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-gray-200'}`}>
+                <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-300" style={{ width: `${progress}%` }} />
+              </div>
             )}
           </div>
 

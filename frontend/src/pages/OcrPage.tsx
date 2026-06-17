@@ -4,23 +4,10 @@
  * @see https://github.com/blacksmoke26
  */
 
-/**
- * OCR Page — Upload images for Urdu text extraction.
- *
- * Supports single-image upload with drag & drop, annotated image preview,
- * per-line results table, confidence stats, and export actions.
- *
- * @author Junaid Atari <mj.atari@gmail.com>
- */
-
-import { useCallback, useRef, useState } from 'react';
-import { Upload, FileImage, Copy, CheckCircle2, AlertTriangle, Loader2, Settings2 } from 'lucide-react';
+import { useCallback, useRef, useState, useEffect } from 'react';
+import { Upload, FileImage, Copy, CheckCircle2, AlertTriangle, Loader2, Settings2, Sparkles, Image as ImageIcon, ClipboardPaste } from 'lucide-react';
 import { ocrSingle, ocrEnhanced } from '#/utils/api/ocr';
-import type { OcrResult, OcrLine, ConfidenceStats, EnhanceOptions } from '#/types/api';
-import { Card } from '#/components/ui/Card';
-import { Button } from '#/components/ui/Button';
-import { Badge } from '#/components/ui/Badge';
-import { ProgressBar } from '#/components/ui/ProgressBar';
+import type { OcrResult, OcrLine, ConfidenceStats } from '#/types/api';
 import { useToast } from '#/context/ToastContext';
 import { formatBytes, isImageFile } from '#/utils/file';
 import type { UploadProgress } from '#/types/api';
@@ -38,8 +25,6 @@ export function OcrPage({ onResult }: OcrPageProps) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
-
-  // Enhancement toggles
   const [autoContrast, setAutoContrast] = useState(false);
   const [sharpen, setSharpen] = useState(false);
   const [denoise, setDenoise] = useState(false);
@@ -47,6 +32,63 @@ export function OcrPage({ onResult }: OcrPageProps) {
 
   const { addToast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
+  const isDark = true;
+
+  /* ── Clipboard paste handling ───────────────────────────── */
+
+  /** Convert a clipboard Blob into a File, if it's an image. */
+  const blobToFile = (blob: Blob): File | null => {
+    const type = blob.type;
+    if (!IMAGE_MIME.includes(type) && !type.startsWith('image/')) return null;
+    const ext = type.split('/')[1] ?? 'png';
+    const name = (file?.name ?? 'pasted-image').replace(/\.[^.]+$/, '') + `.${ext}`;
+    return new File([blob], name, { type });
+  };
+
+  /** Handle an image pasted from the clipboard. */
+  const handlePasteImage = useCallback((blob: Blob) => {
+    const file = blobToFile(blob);
+    if (!file) {
+      addToast('Clipboard does not contain an image.', 'error');
+      return;
+    }
+    setFile(file);
+    setResult(null);
+    const reader = new FileReader();
+    reader.onload = () => setPreview(reader.result as string);
+    reader.readAsDataURL(file);
+    addToast('Image pasted from clipboard.', 'success');
+  }, [addToast]);
+
+  /** Global paste listener — works anywhere on the page. */
+  useEffect(() => {
+    const handler = (e: ClipboardEvent) => {
+      if (!e.clipboardData) return;
+      for (const item of e.clipboardData.items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const blob = item.getAsFile();
+          if (blob) handlePasteImage(blob);
+          return;
+        }
+      }
+    };
+    document.addEventListener('paste', handler);
+    return () => document.removeEventListener('paste', handler);
+  }, [handlePasteImage]);
+
+  /** Paste event on the drop zone itself (captures before global). */
+  const onZonePaste = useCallback((e: React.ClipboardEvent) => {
+    if (!e.clipboardData) return;
+    for (const item of e.clipboardData.items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (blob) handlePasteImage(blob);
+        return;
+      }
+    }
+  }, [handlePasteImage]);
 
   /* ── File handling ──────────────────────────────────────── */
 
@@ -80,7 +122,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
       const useEnhance = autoContrast || sharpen || denoise || normBg;
 
       if (useEnhance) {
-        const opts: EnhanceOptions = { auto_contrast: autoContrast, sharpen, denoise, normalize_background: normBg };
+        const opts = { auto_contrast: autoContrast, sharpen, denoise, normalize_background: normBg };
         data = await ocrEnhanced(file, opts, setProgress);
       } else {
         data = await ocrSingle(file, undefined, setProgress);
@@ -116,29 +158,64 @@ export function OcrPage({ onResult }: OcrPageProps) {
   /* ── Render helpers ─────────────────────────────────────── */
 
   const confidenceColor = (c: number) => {
-    if (c >= 0.7) return 'text-emerald-600 dark:text-emerald-400';
-    if (c >= 0.4) return 'text-amber-600 dark:text-amber-400';
-    return 'text-red-600 dark:text-red-400';
+    if (c >= 0.7) return 'text-emerald-400';
+    if (c >= 0.4) return 'text-amber-400';
+    return 'text-red-400';
+  };
+
+  const confidenceBg = (c: number) => {
+    if (c >= 0.7) return 'bg-emerald-500/20 text-emerald-400';
+    if (c >= 0.4) return 'bg-amber-500/20 text-amber-400';
+    return 'bg-red-500/20 text-red-400';
   };
 
   const statsBars = (stats: ConfidenceStats) => [
-    { label: 'Mean', value: stats.mean, color: 'bg-violet-500' },
-    { label: 'Median', value: stats.median, color: 'bg-blue-500' },
-    { label: 'Min', value: stats.min, color: 'bg-red-400' },
-    { label: 'Max', value: stats.max, color: 'bg-emerald-500' },
+    { label: 'Mean', value: stats.mean, color: 'from-violet-500 to-purple-500' },
+    { label: 'Median', value: stats.median, color: 'from-blue-500 to-cyan-500' },
+    { label: 'Min', value: stats.min, color: 'from-red-400 to-rose-500' },
+    { label: 'Max', value: stats.max, color: 'from-emerald-400 to-green-500' },
   ];
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      {/* ── Upload Zone ───────────────────────────────────── */}
-      <Card title="Upload Image" description="Drop an image or click to select. Supports JPG, PNG, WebP, BMP, GIF.">
+
+      {/* ── Hero Section ─────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl border border-violet-500/10 bg-gradient-to-br from-violet-500/5 via-transparent to-purple-500/5">
+        <div className="absolute inset-0 bg-grid opacity-30" />
+        <div className="relative px-6 py-8 sm:px-10 sm:py-12 text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-violet-500/20 bg-violet-500/10 text-violet-400 text-xs font-medium mb-4">
+            <Sparkles className="h-3 w-3" /> AI-Powered Urdu OCR
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-2">
+            Extract Urdu Text from <span className="gradient-text">Images</span>
+          </h2>
+          <p className={`text-sm max-w-md mx-auto ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+            Upload any image with Urdu text and get instant, accurate text extraction powered by advanced OCR models.
+          </p>
+          <p className={`text-xs mt-2 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>Tip: You can also <span className="inline-flex items-center gap-1"><ClipboardPaste className="h-3 w-3"/> paste an image directly (Ctrl+V)</span></p>
+        </div>
+      </div>
+
+      {/* ── Upload Zone ─────────────────────────────── */}
+      <div className="glass-card rounded-2xl p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <ImageIcon className={`h-5 w-5 ${isDark ? 'text-slate-300' : 'text-gray-600'}`} />
+          <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Upload Image</h3>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700/50 text-slate-400' : 'bg-gray-100 text-gray-500'}`}>JPG, PNG, WebP, BMP, GIF</span>
+        </div>
+
         <div
-          className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
-            preview ? 'border-violet-300 dark:border-violet-600' : 'border-gray-200 dark:border-slate-700 hover:border-violet-400'
+          className={`relative border-2 border-dashed rounded-xl p-8 sm:p-12 text-center transition-all duration-300 cursor-pointer ${
+            preview
+              ? 'border-violet-500/40 bg-violet-500/5'
+              : isDark
+                ? 'border-slate-700/60 hover:border-violet-500/30 hover:bg-white/[0.02]'
+                : 'border-gray-200 hover:border-violet-400/40 hover:bg-violet-50/30'
           }`}
           onDragOver={(e) => e.preventDefault()}
           onDrop={onDrop}
           onClick={() => inputRef.current?.click()}
+          onPasteCapture={onZonePaste}
         >
           <input
             ref={inputRef}
@@ -149,138 +226,233 @@ export function OcrPage({ onResult }: OcrPageProps) {
           />
 
           {preview ? (
-            <div className="space-y-3">
-              <img src={preview} alt="Preview" className="max-h-64 mx-auto rounded-lg object-contain" />
-              <p className="text-xs text-gray-500">{file?.name} · {formatBytes(file?.size ?? 0)}</p>
+            <div className="space-y-4">
+              <div className="relative inline-block max-h-72 rounded-xl overflow-hidden border border-slate-700/50">
+                <img src={preview} alt="Preview" className="max-h-72 mx-auto object-contain" />
+              </div>
+              <div className={`inline-flex items-center gap-2 text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                {file?.name} · {formatBytes(file?.size ?? 0)}
+              </div>
             </div>
           ) : (
-            <div className="space-y-2">
-              <Upload className="h-10 w-10 mx-auto text-gray-400 dark:text-gray-500" />
-              <p className="text-sm text-gray-500 dark:text-gray-400">Drag & drop or click to select</p>
+            <div className="space-y-3">
+              <div className={`w-16 h-16 rounded-2xl mx-auto flex items-center justify-center ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
+                <Upload className={`h-8 w-8 ${isDark ? 'text-slate-500' : 'text-gray-400'}`} />
+              </div>
+              <div>
+                <p className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>Drag & drop or click to select</p>
+                <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>Maximum file size: 20MB</p>
+              </div>
             </div>
           )}
         </div>
 
         {/* Enhancement options */}
-        <details className="mt-4" open={enhanceOpen}>
-          <summary
+        <div className="mt-4">
+          <button
             onClick={() => setEnhanceOpen(!enhanceOpen)}
-            className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300 cursor-pointer"
+            className={`flex items-center gap-2 text-sm font-medium cursor-pointer transition-colors ${isDark ? 'text-slate-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'}`}
           >
             <Settings2 className="h-4 w-4" /> Enhancement Options
-          </summary>
-          <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {([
-              ['Auto Contrast', autoContrast, setAutoContrast],
-              ['Sharpen', sharpen, setSharpen],
-              ['Denoise', denoise, setDenoise],
-              ['Normalize BG', normBg, setNormBg],
-            ] as const).map(([label, val, set]) => (
-              <label key={label} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                <input type="checkbox" checked={val} onChange={() => set(!val)} className="accent-violet-600" />
-                {label}
-              </label>
-            ))}
-          </div>
-        </details>
+            <span className={`text-xs px-1.5 py-0.5 rounded ${isDark ? 'bg-slate-700/50 text-slate-400' : 'bg-gray-100 text-gray-500'}`}>
+              {autoContrast || sharpen || denoise || normBg ? 'Active' : 'Off'}
+            </span>
+          </button>
 
-        <div className="mt-4 flex items-center gap-3">
-          <Button onClick={runOcr} disabled={!file || loading} loading={loading}>
-            {loading ? 'Processing…' : 'Extract Text'}
-          </Button>
-          {progress > 0 && progress < 100 && (
-            <ProgressBar value={progress} label="Upload progress" />
+          {enhanceOpen && (
+            <div className={`mt-3 p-4 rounded-xl ${isDark ? 'bg-white/[0.02]' : 'bg-gray-50'}`}>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  ['Auto Contrast', autoContrast] as const,
+                  ['Sharpen', sharpen] as const,
+                  ['Denoise', denoise] as const,
+                  ['Normalize BG', normBg] as const,
+                ].map(([label, val]) => {
+                  const setters: Record<string, () => void> = {
+                    'Auto Contrast': () => setAutoContrast(!autoContrast),
+                    Sharpen: () => setSharpen(!sharpen),
+                    Denoise: () => setDenoise(!denoise),
+                    'Normalize BG': () => setNormBg(!normBg),
+                  };
+                  return (
+                    <label key={label} className="flex items-center gap-2 text-sm cursor-pointer group">
+                      <div className={`relative w-9 h-5 rounded-full transition-colors ${val ? 'bg-violet-500' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`}>
+                        <input type="checkbox" checked={val} onChange={setters[label]} className="sr-only peer" />
+                        <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${val ? 'translate-x-4' : ''}`} />
+                      </div>
+                      <span className={`${isDark ? 'text-slate-300 group-hover:text-white' : 'text-gray-600 group-hover:text-gray-900'} transition-colors`}>{label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
-      </Card>
 
-      {/* ── Results Section ────────────────────────────────── */}
+        {/* Action buttons */}
+        <div className="mt-5 flex items-center gap-3">
+          <button
+            onClick={runOcr}
+            disabled={!file || loading}
+            className={`relative inline-flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-semibold transition-all duration-300 ${
+              file && !loading
+                ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:scale-[1.02]'
+                : isDark ? 'bg-slate-800 text-slate-500' : 'bg-gray-200 text-gray-400'
+            } disabled:cursor-not-allowed`}
+          >
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Processing…
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                Extract Text
+              </>
+            )}
+          </button>
+
+          {progress > 0 && progress < 100 && (
+            <div className="flex-1 max-w-[200px]">
+              <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-gray-200'}`}>
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Results Section ─────────────────────────── */}
       {result && (
         <>
-          {/* Status line */}
-          <div className="flex items-center gap-3">
-            <Badge variant={result.status === 'success' ? 'success' : 'error'} label={result.status.toUpperCase()} />
-            <span className="text-sm text-gray-500">{result.task_id}</span>
-            <span className="text-sm text-gray-500">· {result.detected_lines} lines</span>
-            <span className="text-sm text-gray-500">· {Math.round(result.processing_time_ms)}ms</span>
+          {/* Status bar */}
+          <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-xl ${isDark ? 'bg-white/[0.03]' : 'bg-gray-100'}`}>
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${
+              result.status === 'success' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+            }`}>
+              {result.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+              {result.status.toUpperCase()}
+            </span>
+            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{result.task_id}</span>
+            <span className={`w-1 h-1 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-300'}`} />
+            <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>{result.detected_lines} lines</span>
+            <span className={`w-1 h-1 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-300'}`} />
+            <span className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>{Math.round(result.processing_time_ms)}ms</span>
           </div>
 
           {/* Annotated Image */}
           {result.annotated_image_b64 && (
-            <Card title="Detected Lines">
-              <img src={`data:image/png;base64,${result.annotated_image_b64}`} alt="Annotated" className="rounded-lg max-h-96 mx-auto object-contain" />
-            </Card>
+            <div className="glass-card rounded-2xl p-6">
+              <h3 className={`font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>Detected Lines</h3>
+              <div className="rounded-xl overflow-hidden border border-slate-700/50">
+                <img src={`data:image/png;base64,${result.annotated_image_b64}`} alt="Annotated" className="max-h-[500px] mx-auto w-full object-contain" />
+              </div>
+            </div>
           )}
 
           {/* Full Text */}
-          <Card title="Extracted Urdu Text" description="Click copy to clipboard or download as .txt.">
-            <div className="flex justify-end gap-2 mb-2">
-              <Button variant="secondary" onClick={() => copyToClipboard(result.full_text)}>
-                <Copy className="h-4 w-4 mr-1" /> Copy
-              </Button>
-              <Button variant="ghost" onClick={downloadTxt}>Download .txt</Button>
+          <div className="glass-card rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Extracted Urdu Text</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => copyToClipboard(result.full_text)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    isDark ? 'bg-white/5 hover:bg-white/10 text-slate-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                  }`}
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </button>
+                <button
+                  onClick={downloadTxt}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    isDark ? 'bg-white/5 hover:bg-white/10 text-slate-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                  }`}
+                >
+                  Download .txt
+                </button>
+              </div>
             </div>
-            <div className="rtl text-right border rounded-lg px-4 py-3 bg-gray-50 dark:bg-slate-900/50 dark:border-slate-700/60 leading-loose text-base">
-              {result.full_text || <span className="text-gray-400 italic">No text detected.</span>}
+            <div className={`rounded-xl px-5 py-4 border leading-loose text-base ${
+              isDark ? 'bg-white/[0.02] border-slate-700/60' : 'bg-gray-50 border-gray-200'
+            }`}>
+              <p className={`rtl text-right ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>
+                {result.full_text || <span className={`${isDark ? 'text-slate-600' : 'text-gray-400'} italic`}>No text detected.</span>}
+              </p>
             </div>
-          </Card>
+          </div>
 
           {/* Per-line table */}
-          <Card title={`Per-Line Results (${result.lines.length})`}>
-            <div className="overflow-x-auto">
+          <div className="glass-card rounded-2xl p-6">
+            <h3 className={`font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>Per-Line Results <span className={`font-normal text-sm ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>({result.lines.length})</span></h3>
+            <div className="overflow-x-auto rounded-xl border border-slate-700/40">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-gray-500 dark:text-gray-400 border-b dark:border-slate-700">
-                    <th className="py-2 pr-4">#</th>
-                    <th className="py-2 pr-4">Text (Urdu)</th>
-                    <th className="py-2 pr-4">Confidence</th>
+                  <tr className={isDark ? 'bg-white/[0.03]' : 'bg-gray-50'}>
+                    <th className={`py-3 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>#</th>
+                    <th className={`py-3 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Text (Urdu)</th>
+                    <th className={`py-3 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Confidence</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.lines.map((line, i) => (
-                    <tr key={i} className="border-b border-gray-100 dark:border-slate-800 last:border-0">
-                      <td className="py-2 pr-4 text-gray-400">{i + 1}</td>
-                      <td className="py-2 pr-4 rtl text-right" dir="rtl">{line.text}</td>
-                      <td className={`py-2 pr-4 font-medium ${confidenceColor(line.confidence)}`}>
-                        {Math.round(line.confidence * 100)}%
+                    <tr key={i} className={`border-t transition-colors ${isDark ? 'border-slate-800/50 hover:bg-white/[0.02]' : 'border-gray-100 hover:bg-gray-50'}`}>
+                      <td className={`py-3 px-4 font-mono text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{i + 1}</td>
+                      <td className="py-3 px-4 rtl text-right" dir="rtl"><span className={`${isDark ? 'text-slate-200' : 'text-gray-800'}`}>{line.text}</span></td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${confidenceBg(line.confidence)}`}>
+                          {Math.round(line.confidence * 100)}%
+                        </span>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </Card>
+          </div>
 
           {/* Confidence Stats */}
-          <Card title="Confidence Statistics">
-            <div className="space-y-2">
+          <div className="glass-card rounded-2xl p-6">
+            <h3 className={`font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>Confidence Statistics</h3>
+            <div className="space-y-3">
               {statsBars(result.confidence_stats).map(({ label, value, color }) => (
                 <div key={label}>
-                  <div className="flex justify-between text-xs text-gray-500 mb-1">
-                    <span>{label}</span>
-                    <span>{Math.round(value * 100)}%</span>
+                  <div className="flex justify-between text-xs mb-1.5">
+                    <span className={`font-medium ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>{label}</span>
+                    <span className={`font-semibold ${confidenceColor(value)}`}>{Math.round(value * 100)}%</span>
                   </div>
-                  <div className="h-2 rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden">
-                    <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.round(value * 100)}%` }} />
+                  <div className={`h-2.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-800/80' : 'bg-gray-100'}`}>
+                    <div
+                      className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-700`}
+                      style={{ width: `${Math.round(value * 100)}%` }}
+                    />
                   </div>
                 </div>
               ))}
             </div>
-          </Card>
+          </div>
         </>
       )}
 
-      {/* Loading overlay */}
+      {/* Loading state */}
       {loading && !progress && (
-        <div className="flex items-center gap-2 text-violet-600 dark:text-violet-400">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm font-medium">Processing image…</span>
+        <div className={`flex items-center gap-3 p-4 rounded-xl ${isDark ? 'bg-violet-500/5 border border-violet-500/10' : 'bg-violet-50 border border-violet-200'}`}>
+          <Loader2 className="h-5 w-5 animate-spin text-violet-400" />
+          <span className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>Processing image… This may take a moment.</span>
         </div>
       )}
 
-      {/* No-result state */}
+      {/* Empty state */}
       {!result && !loading && file && (
-        <p className="text-center text-sm text-gray-400 mt-8">Upload an image and click "Extract Text" to begin.</p>
+        <div className={`text-center py-12 rounded-2xl border border-dashed ${isDark ? 'border-slate-800 bg-white/[0.01]' : 'border-gray-200 bg-gray-50/50'}`}>
+          <Sparkles className={`h-8 w-8 mx-auto mb-3 ${isDark ? 'text-slate-600' : 'text-gray-400'}`} />
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Click "Extract Text" to process your image.</p>
+        </div>
       )}
     </div>
   );
