@@ -1,0 +1,37 @@
+/**
+ * Status Badge component.
+ * Displays small colored indicators for health, processing state, or result status.
+ */
+
+import { CheckCircle2, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
+
+type BadgeVariant = 'success' | 'error' | 'warning' | 'loading' | 'info';
+
+export interface BadgeProps {
+  /** Semantic variant controlling color and icon. */
+  variant?: BadgeVariant;
+  /** Short text label displayed inside the badge. */
+  label: string;
+}
+
+const STYLE_MAP: Record<BadgeVariant, { bg: string; text: string; icon: typeof CheckCircle2 }> = {
+  success: { bg: 'bg-emerald-500/10', text: 'text-emerald-600 dark:text-emerald-400', icon: CheckCircle2 },
+  error:   { bg: 'bg-red-500/10',     text: 'text-red-600 dark:text-red-400',     icon: XCircle },
+  warning: { bg: 'bg-amber-500/10',   text: 'text-amber-600 dark:text-amber-400', icon: AlertTriangle },
+  loading: { bg: 'bg-blue-500/10',    text: 'text-blue-600 dark:text-blue-400',   icon: Loader2 },
+  info:    { bg: 'bg-violet-500/10',  text: 'text-violet-600 dark:text-violet-400', icon: CheckCircle2 },
+};
+
+/**
+ * A small inline indicator with an icon and label.
+ * Supports `loading` variant which shows a spinner animation.
+ */
+export function Badge({ variant = 'info', label }: BadgeProps) {
+  const { bg, text, icon: Icon } = STYLE_MAP[variant];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${bg} ${text}`}>
+      <Icon className={`h-3 w-3 ${variant === 'loading' ? 'animate-spin' : ''}`} />
+      {label}
+    </span>
+  );
+}

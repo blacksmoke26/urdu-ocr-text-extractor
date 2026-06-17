@@ -1,0 +1,8 @@
+.idea
+*.*bak
+.trash
+.agents
+.playwright-mcp
+nul
+.vscode
+.zed
