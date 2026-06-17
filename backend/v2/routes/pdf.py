@@ -247,6 +247,14 @@ async def pdf_ocr_endpoint(
     img_size: int = Form(1280),
     text_cleaning: str = Form("true"),
     task_id: str = Form(""),  # Allow frontend to pass its own task_id for cancellation
+    use_cache: str = Form("false"),  # Enable result caching
+    device: str = Form(""),  # Override device (cpu/cuda)
+    det_type: str = Form(""),  # Detection type: yolo, detr, mllm
+    det_conf: float | None = Form(None),  # Detection confidence threshold
+    mllm_model: str = Form(""),  # MLLM model name
+    layout_analysis: str = Form("false"),  # Enable layout analysis
+    post_processing: str = Form(""),  # Post-processing pipeline
+    preprocess_options: str = Form(""),  # JSON-encoded preprocessing options
 ):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
@@ -279,6 +287,29 @@ async def pdf_ocr_endpoint(
             clean_opts = _json.loads(text_cleaning)
         except Exception:
             clean_opts = True
+
+    # Parse advanced options
+    advanced: dict = {}
+    if use_cache and use_cache.lower() == "true":
+        advanced["use_cache"] = True
+    if device:
+        advanced["device"] = device
+    if det_type:
+        advanced["det_type"] = det_type
+    if det_conf is not None:
+        advanced["det_conf"] = float(det_conf)
+    if mllm_model:
+        advanced["mllm_model"] = mllm_model
+    if layout_analysis and layout_analysis.lower() == "true":
+        advanced["layout_analysis"] = True
+    if post_processing:
+        advanced["post_processing"] = post_processing
+    if preprocess_options:
+        try:
+            import json as _json2
+            advanced["preprocess_options"] = _json2.loads(preprocess_options)
+        except Exception:
+            pass  # Ignore invalid JSON
 
     tw = THUMB_WIDTH
     th = THUMB_HEIGHT
@@ -336,6 +367,7 @@ async def pdf_ocr_endpoint(
                     img_size=img_size,
                     text_cleaning=clean_opts,
                     interrupt_event=None,  # already checked externally
+                    **advanced,
                 )
 
             page_results = await loop.run_in_executor(None, _ocr_page, data_bytes, current_page_num)
