@@ -95,6 +95,9 @@ async def batch_ocr_endpoint(
         import json
         try:
             clean_opts = json.loads(text_cleaning)
+            # Enable autocorrect if requested via text_cleaning options
+            if isinstance(clean_opts, dict) and clean_opts.get("autocorrect"):
+                clean_opts["autocorrect_mode"] = clean_opts.get("autocorrect_mode", "char")
         except Exception:
             clean_opts = True
 
@@ -217,6 +220,9 @@ async def single_ocr_endpoint(
         import json
         try:
             clean_opts = json.loads(text_cleaning)
+            # Enable autocorrect if requested via text_cleaning options
+            if isinstance(clean_opts, dict) and clean_opts.get("autocorrect"):
+                clean_opts["autocorrect_mode"] = clean_opts.get("autocorrect_mode", "char")
         except Exception:
             clean_opts = True
 

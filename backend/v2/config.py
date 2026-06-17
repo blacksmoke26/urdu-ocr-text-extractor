@@ -91,6 +91,18 @@ CORS_ORIGINS: list[str] = [
 # ─── Text Cleaning ────────────────────────────────────────────
 TEXT_CLEANING_ENABLED: bool = os.getenv("OCR_TEXT_CLEANING_ENABLED", "true").lower() == "true"
 
+# ─── Urdu Text Auto-Correction ────────────────────────────────
+URDUTEXT_AUTOCORRECT_ENABLED: bool = os.getenv("URDUTEXT_AUTOCORRECT_ENABLED", "false").lower() == "true"
+URDUTEXT_AUTOCORRECT_MODE: str = os.getenv("URDUTEXT_AUTOCORRECT_MODE", "char").lower()  # char | context
+
+# ─── Detection Enhancements ────────────────────────────────────
+BBOX_PADDING_PERCENT: float = float(os.getenv("BBOX_PADDING_PERCENT", "10"))  # % to expand bounding boxes
+AUTO_ENHANCE_ENABLED: bool = os.getenv("AUTO_ENHANCE_ENABLED", "true").lower() == "true"
+AUTO_DEBLUR_ENABLED: bool = os.getenv("AUTO_DEBLUR_ENABLED", "true").lower() == "true"
+
+# ─── Recognition Improvements ──────────────────────────────────
+BEAM_SEARCH_WIDTH: int = int(os.getenv("BEAM_SEARCH_WIDTH", "5"))  # beam search width for decoding
+
 # ─── Ensure directories exist ─────────────────────────────────
 for d in [UPLOAD_DIR, RESULTS_DIR, CACHE_DIR, EXPORT_DIR, BASE_DIR / "logs"]:
     d.mkdir(parents=True, exist_ok=True)

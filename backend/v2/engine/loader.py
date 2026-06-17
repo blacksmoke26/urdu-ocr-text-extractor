@@ -87,12 +87,18 @@ class CTCLabelConverter(object):
 # ── UTRNet Model — exact copy from original repo ─────────────────
 
 class dropout_layer(nn.Module):
-    """Custom per-pixel dropout used in the original UTRNet."""
+    """Custom per-pixel dropout used in the original UTRNet.
+
+    Respects PyTorch's train/eval mode: deterministic during inference (model.eval()).
+    """
     def __init__(self, device):
         super(dropout_layer, self).__init__()
         self.device = device
 
     def forward(self, input):
+        if not self.training:
+            # Deterministic during inference — critical for consistent OCR output
+            return input
         nums = (np.random.rand(input.shape[1]) > 0.2).astype(int)
         dummy_array_output = torch.from_numpy(nums).to(self.device)
         dummy_array_output_t = torch.reshape(dummy_array_output, (input.shape[1], 1)).to(self.device)

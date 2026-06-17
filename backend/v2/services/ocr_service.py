@@ -16,6 +16,8 @@ from config import (
     DEFAULT_CONF_THRESHOLD,
     DEFAULT_IMG_SIZE,
     TEXT_CLEANING_ENABLED,
+    URDUTEXT_AUTOCORRECT_ENABLED,
+    URDUTEXT_AUTOCORRECT_MODE,
 )
 from engine.pipeline import OCRResult, run_ocr_pipeline
 from engine.text_cleaner import TextCleaner
@@ -23,7 +25,7 @@ from services.cache_service import ResultCache
 
 
 class OCRService:
-    """High-level OCR service with caching and text cleaning."""
+    """High-level OCR service with caching, text cleaning, and auto-correction."""
 
     def __init__(self, cache: Optional[ResultCache] = None):
         self._cache = cache or ResultCache(enabled=CACHE_ENABLED, ttl_seconds=CACHE_TTL_SECONDS)
@@ -114,8 +116,8 @@ class OCRService:
                 result._page_thumb_b64 = page_thumb_b64  # type: ignore
                 results.append(result)
             except Exception as e:
-                # Return minimal result for failed pages
                 import time as _time
+                import traceback
                 results.append(OCRResult(
                     filename=page_filename, file_type="pdf_page", lines=[], full_text="",
                     processing_time_ms=0.0,
@@ -131,6 +133,10 @@ class OCRService:
         if not TEXT_CLEANING_ENABLED or not text_cleaning:
             return result
 
+        # Determine autocorrect settings
+        autocorrect_enabled = URDUTEXT_AUTOCORRECT_ENABLED
+        autocorrect_mode = URDUTEXT_AUTOCORRECT_MODE
+
         if isinstance(text_cleaning, dict):
             options = {
                 "diacritics": text_cleaning.get("remove_diacritics", False),
@@ -139,6 +145,10 @@ class OCRService:
                 "reshape": text_cleaning.get("reshape", True),
                 "normalize_whitespace": text_cleaning.get("normalize_whitespace", True),
             }
+            # Allow per-request autocorrect override
+            autocorrect_enabled = text_cleaning.get("autocorrect", autocorrect_enabled)
+            if "autocorrect_mode" in text_cleaning:
+                autocorrect_mode = text_cleaning["autocorrect_mode"]
         else:
             options = {
                 "diacritics": False,
@@ -150,14 +160,23 @@ class OCRService:
 
         cleaned_lines = []
         for line in result.lines:
-            cleaned_text = TextCleaner.clean(line.text, **options)
+            if autocorrect_enabled and autocorrect_mode:
+                cleaned_text, correction_stats = TextCleaner.clean_and_autocorrect(
+                    line.text, mode=autocorrect_mode, **options
+                )
+            else:
+                cleaned_text = TextCleaner.clean(line.text, **options)
+                correction_stats = None
+
             new_line = type(line)(
                 index=line.index,
                 text=cleaned_text,
                 confidence=line.confidence,
+                char_confidences=getattr(line, 'char_confidences', None),
                 bounding_box=line.bounding_box,
                 detection_confidence=line.detection_confidence,
             )
+            new_line._correction_stats = correction_stats  # type: ignore
             cleaned_lines.append(new_line)
 
         full_cleaned = "\n".join(l.text for l in cleaned_lines)
@@ -170,11 +189,12 @@ class OCRService:
     def _dict_to_ocr_result(self, d: dict, text_cleaning: bool | dict = False) -> OCRResult:
         """Convert a cached dict back to an OCRResult object."""
         class FakeLine:
-            __slots__ = ("index", "text", "confidence", "bounding_box", "detection_confidence")
+            __slots__ = ("index", "text", "confidence", "char_confidences", "bounding_box", "detection_confidence")
             def __init__(self, d):
                 self.index = d["index"]
                 self.text = d["text"]
                 self.confidence = d.get("confidence")
+                self.char_confidences = d.get("char_confidences", None)
                 self.bounding_box = d.get("bounding_box", [])
                 self.detection_confidence = d.get("detection_confidence")
 
