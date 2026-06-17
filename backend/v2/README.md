@@ -90,7 +90,7 @@ See `config.example.env` for all options. Key variables:
 | `OCR_DEVICE` | `auto` | `cpu`, `cuda`, or `auto` |
 | `OCR_CONF_THRESHOLD` | `0.2` | YOLO detection confidence |
 | `OCR_IMG_SIZE` | `1280` | Input image size for YOLO |
-| `OCR_MAX_FILE_SIZE_MB` | `50` | Max upload file size |
+| `OCR_MAX_FILE_SIZE_MB` | `500` | Max upload file size |
 | `OCR_CACHE_ENABLED` | `true` | Enable result caching |
 | `OCR_CACHE_TTL` | `3600` | Cache TTL in seconds |
 | `OCR_RATE_LIMIT_ENABLED` | `true` | Enable rate limiting |

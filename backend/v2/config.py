@@ -36,7 +36,7 @@ RESULTS_DIR = BASE_DIR / "results"
 CACHE_DIR = BASE_DIR / "cache"
 
 # ─── File Limits ──────────────────────────────────────────────
-MAX_FILE_SIZE_MB: int = int(os.getenv("OCR_MAX_FILE_SIZE_MB", "50"))
+MAX_FILE_SIZE_MB: int = int(os.getenv("OCR_MAX_FILE_SIZE_MB", "500"))
 MAX_BATCH_FILES: int = int(os.getenv("OCR_MAX_BATCH_FILES", "10"))
 ALLOWED_IMAGE_EXTENSIONS: set = {
     "jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp", "gif", "svg"

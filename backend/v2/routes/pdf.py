@@ -11,7 +11,7 @@ import fitz  # PyMuPDF
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response as FastAPIResponse
 
-from config import THUMB_WIDTH, THUMB_HEIGHT
+from config import MAX_FILE_SIZE_MB, THUMB_WIDTH, THUMB_HEIGHT
 from engine.loader import load_models
 from engine.metrics import get_metrics
 from services.pdf_service import PDFService
@@ -40,7 +40,7 @@ async def pdf_info_endpoint(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
     data_bytes = _read_pdf(file)
-    ok, msg = validate_file_size(data_bytes, 50)
+    ok, msg = validate_file_size(data_bytes, MAX_FILE_SIZE_MB)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
 
@@ -75,7 +75,7 @@ async def pdf_extract_endpoint(
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
     data_bytes = _read_pdf(file)
-    ok, msg = validate_file_size(data_bytes, 50)
+    ok, msg = validate_file_size(data_bytes, MAX_FILE_SIZE_MB)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
 
@@ -207,7 +207,7 @@ async def pdf_reconstruct_endpoint(
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
     data_bytes = _read_pdf(file)
-    ok, msg = validate_file_size(data_bytes, 50)
+    ok, msg = validate_file_size(data_bytes, MAX_FILE_SIZE_MB)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
 
@@ -254,7 +254,7 @@ async def pdf_ocr_endpoint(
     load_models()
 
     data_bytes = _read_pdf(file)
-    ok, msg = validate_file_size(data_bytes, 50)
+    ok, msg = validate_file_size(data_bytes, MAX_FILE_SIZE_MB)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
 
