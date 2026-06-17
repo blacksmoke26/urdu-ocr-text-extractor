@@ -5,15 +5,20 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Activity, Cpu, MemoryStick, Settings2, RefreshCw, Trash2, Server, Shield, Wifi } from 'lucide-react';
+import { Activity, Cpu, MemoryStick, Settings2, RefreshCw, Trash2, Server, Shield, Wifi, Clock, History } from 'lucide-react';
 import { fetchHealth, fetchConfig, fetchCacheStats, clearCache, switchDevice } from '#/utils/api/system';
-import type { HealthCheck, ServerConfig, CacheStats } from '#/types/api';
+import { getHistory, clearHistory as clearHistApi } from '#/utils/api/analysis';
+import type { HealthCheck, ServerConfig, CacheStats, HistoryResponse } from '#/types/api';
+import { useTheme } from '#/context/ThemeContext';
 
 export function SystemPage() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [health, setHealth] = useState<HealthCheck | null>(null);
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<HistoryResponse | null>(null);
 
   useEffect(() => {
     async function poll() {
@@ -28,6 +33,11 @@ export function SystemPage() {
   useEffect(() => {
     fetchConfig().then(setConfig).catch(() => {});
     fetchCacheStats().then((d) => setCacheStats(d.cache)).catch(() => {});
+    getHistory(20).then(setHistory).catch(() => {});
+    const histInterval = setInterval(() => {
+      getHistory(20).then(setHistory).catch(() => {});
+    }, 10_000);
+    return () => clearInterval(histInterval);
   }, []);
 
   const onClearCache = async () => {
@@ -222,6 +232,13 @@ export function SystemPage() {
           </div>
         </div>
       )}
+
+      {/* ── Processing History ─────────────────── */}
+      {history && (
+        <div className="glass-card rounded-2xl p-6 relative overflow-hidden">
+          <ProcessingHistoryTable history={history} isDark={isDark} />
+        </div>
+      )}
     </div>
   );
 }
@@ -274,4 +291,120 @@ function ConfigItem({ label, value, accent = 'text-slate-300' }: { label: string
       <span className={`font-medium ${accent}`}>{value}</span>
     </div>
   );
+}
+
+/* ── Processing History sub-components ───────────── */
+
+function ProcessingHistoryTable({ history, isDark }: { history: HistoryResponse; isDark: boolean }) {
+  return (
+    <>
+      <div className="absolute top-0 right-0 w-48 h-48 bg-cyan-500/5 rounded-full blur-3xl -translate-y-12 translate-x-12" />
+      <div className="relative">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-cyan-500/10">
+              <History className="h-5 w-5 text-cyan-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">Processing History</h3>
+              <p className="text-xs text-slate-500">Recent OCR operations · auto-refresh every 10s</p>
+            </div>
+          </div>
+        </div>
+
+        {history.stats && (
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
+            <HistStat label="Total Ops" value={history.stats.total_operations} color="text-violet-400" />
+            <HistStat label="Success" value={history.stats.by_status.success || 0} color="text-emerald-400" />
+            <HistStat label="Failed" value={history.stats.by_status.error || history.stats.by_status.failure || 0} color="text-red-400" />
+            <HistStat label="Avg Time" value={`${Math.round(history.stats.avg_processing_time_ms)}ms`} color="text-blue-400" />
+            <HistStat label="Avg Confidence" value={history.stats.avg_confidence ? `${Math.round(history.stats.avg_confidence * 100)}%` : 'N/A'} color="text-amber-400" />
+          </div>
+        )}
+
+        {history.entries.length > 0 && (
+          <div className="overflow-x-auto rounded-xl border border-slate-800/40">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className={isDark ? 'bg-white/[0.03]' : 'bg-gray-50'}>
+                  <th className={`py-2.5 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Time</th>
+                  <th className={`py-2.5 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Operation</th>
+                  <th className={`py-2.5 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>File</th>
+                  <th className={`py-2.5 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Lines</th>
+                  <th className={`py-2.5 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Confidence</th>
+                  <th className={`py-2.5 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Language</th>
+                  <th className={`py-2.5 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.entries.slice(0, 15).map((entry) => (
+                  <tr key={entry.id} className={`border-t ${isDark ? 'border-slate-800/50 hover:bg-white/[0.02]' : 'border-gray-100 hover:bg-gray-50'}`}>
+                    <td className="py-2 px-4 text-xs text-slate-400">{formatTime(entry.timestamp)}</td>
+                    <td className="py-2 px-4">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                        entry.operation.includes('ocr') ? 'bg-violet-500/10 text-violet-400' :
+                        entry.operation.includes('pdf') ? 'bg-blue-500/10 text-blue-400' :
+                        'bg-slate-500/10 text-slate-400'
+                      }`}>{entry.operation.replace(/_/g, ' ')}</span>
+                    </td>
+                    <td className={`py-2 px-4 text-xs truncate max-w-[150px] ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>{entry.filename}</td>
+                    <td className="py-2 px-4 text-xs font-mono text-slate-400">{entry.lines_detected}</td>
+                    <td className="py-2 px-4">
+                      {entry.confidence_mean ? (
+                        <span className={`text-xs font-semibold ${
+                          entry.confidence_mean >= 0.7 ? 'text-emerald-400' :
+                          entry.confidence_mean >= 0.4 ? 'text-amber-400' : 'text-red-400'
+                        }`}>{Math.round(entry.confidence_mean * 100)}%</span>
+                      ) : (
+                        <span className="text-xs text-slate-600">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-4">
+                      {entry.language ? (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                          entry.language === 'ur' || entry.language === 'mixed' ? 'bg-emerald-500/10 text-emerald-400' :
+                          'bg-slate-500/10 text-slate-400'
+                        }`}>{entry.language.toUpperCase()}</span>
+                      ) : (
+                        <span className="text-xs text-slate-600">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-4">
+                      {entry.status === 'success' ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-medium">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> OK
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs text-red-400 font-medium">
+                          <span className="h-1.5 w-1.5 rounded-full bg-red-400" /> Failed
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function HistStat({ label, value, color }: { label: string; value: number | string; color: string }) {
+  const displayValue = typeof value === 'number' ? value.toLocaleString() : String(value);
+  return (
+    <div className={`p-3 rounded-xl bg-white/[0.02] border border-slate-800/40`}>
+      <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1">{label}</p>
+      <p className={`text-lg font-bold ${color} tracking-tight`}>{displayValue}</p>
+    </div>
+  );
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts * 1000);
+  const h = d.getHours().toString().padStart(2, '0');
+  const m = d.getMinutes().toString().padStart(2, '0');
+  const s = d.getSeconds().toString().padStart(2, '0');
+  return `${h}:${m}:${s}`;
 }

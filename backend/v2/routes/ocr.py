@@ -22,6 +22,7 @@ from engine.loader import load_models
 from engine.metrics import get_metrics
 from services.ocr_service import OCRService
 from services.cache_service import ResultCache
+from services.processing_history import record_operation
 from utils.file_utils import get_file_ext, validate_extension
 from utils.image_utils import enhance_image, validate_file_size
 
@@ -193,6 +194,8 @@ async def batch_ocr_endpoint(
         "results": results,
     })
 
+# Re-import for use in _record_and_analyze within batch context (already imported above)
+
 
 @ocr_router.post(
     "/ocr/single",
@@ -254,6 +257,12 @@ async def single_ocr_endpoint(
     response_data["thumb_image_b64"] = thumb_image_b64
     response_data["thumb_width"] = THUMB_WIDTH
     response_data["thumb_height"] = THUMB_HEIGHT
+
+    # Auto AI analysis + history recording
+    ai_result = _record_and_analyze(response_data, operation="ocr_single")
+    for key in ("ai_analysis", "summary", "recommendations", "table_detection"):
+        if ai_result.get(key) is not None:
+            response_data[key] = ai_result[key]
 
     # Record per-API metrics
     metrics = get_metrics()
@@ -325,6 +334,12 @@ async def enhanced_ocr_endpoint(
     response_data["thumb_width"] = THUMB_WIDTH
     response_data["thumb_height"] = THUMB_HEIGHT
 
+    # Auto AI analysis + history recording
+    ai_result = _record_and_analyze(response_data, operation="ocr_enhanced")
+    for key in ("ai_analysis", "summary", "recommendations", "table_detection"):
+        if ai_result.get(key) is not None:
+            response_data[key] = ai_result[key]
+
     # Record per-API metrics
     metrics = get_metrics()
     metrics.latency_global.record(elapsed)
@@ -391,4 +406,16 @@ async def direct_ocr_endpoint(
         "thumb_width": THUMB_WIDTH,
         "thumb_height": THUMB_HEIGHT,
     }
+
+    # Auto AI analysis + history recording
+    ai_result = _record_and_analyze(response, operation="ocr_direct")
+    for key in ("ai_analysis", "summary", "recommendations", "table_detection"):
+        if ai_result.get(key) is not None:
+            response[key] = ai_result[key]
+
     return JSONResponse(response)
+
+
+# ── Combined Analysis Helper (auto-record + analyze) ───────────
+
+from routes.analysis import record_and_analyze as _record_and_analyze

@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useRef, useState, useEffect } from 'react';
-import { Upload, FileImage, Copy, CheckCircle2, AlertTriangle, Loader2, Settings2, Sparkles, Image as ImageIcon, ClipboardPaste } from 'lucide-react';
+import { Upload, FileImage, Copy, CheckCircle2, AlertTriangle, Loader2, Settings2, Sparkles, Image as ImageIcon, ClipboardPaste, Brain, BookOpen, Mic, Hash, Info } from 'lucide-react';
 import { ocrSingle, ocrEnhanced } from '#/utils/api/ocr';
 import type { OcrResult, OcrLine, ConfidenceStats } from '#/types/api';
 import { useToast } from '#/context/ToastContext';
@@ -29,6 +29,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
   const [sharpen, setSharpen] = useState(false);
   const [denoise, setDenoise] = useState(false);
   const [normBg, setNormBg] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
 
   const { addToast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -343,7 +344,29 @@ export function OcrPage({ onResult }: OcrPageProps) {
             <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>{result.detected_lines} lines</span>
             <span className={`w-1 h-1 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-300'}`} />
             <span className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>{Math.round(result.processing_time_ms)}ms</span>
+
+            {/* AI Insights toggle */}
+            {(result as any).ai_analysis && (
+              <>
+                <span className={`w-1 h-1 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-300'}`} />
+                <button
+                  onClick={() => setInsightsOpen(!insightsOpen)}
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                    insightsOpen
+                      ? 'bg-violet-500/15 text-violet-400'
+                      : isDark ? 'text-slate-400 hover:text-white' : 'text-gray-500 hover:text-gray-900'
+                  }`}
+                >
+                  <Brain className="h-3 w-3" />
+                  AI Insights
+                  <span className={`transform transition-transform ${insightsOpen ? 'rotate-180' : ''}`}>▼</span>
+                </button>
+              </>
+            )}
           </div>
+
+          {/* AI Insights Panel */}
+          {insightsOpen && (result as any).ai_analysis && <AiInsightsPanel result={result} isDark={isDark} />}
 
           {/* Annotated Image */}
           {result.annotated_image_b64 && (
@@ -456,4 +479,176 @@ export function OcrPage({ onResult }: OcrPageProps) {
       )}
     </div>
   );
+}
+
+/* ── AI Insights Sub-component ─────────────────────────────── */
+
+function AiInsightsPanel({ result, isDark }: { result: OcrResult; isDark: boolean }) {
+  const ai = (result as any).ai_analysis as DocumentAnalysis | undefined;
+  const summary = (result as any).summary as SummaryResult | undefined;
+  const tableDet = (result as any).table_detection as TableDetection | undefined;
+
+  if (!ai) return null;
+
+  const langCodeToLabel: Record<string, string> = {
+    ur: 'Urdu', ar: 'Arabic', en: 'English', fa: 'Persian', mixed: 'Mixed', unknown: 'Unknown',
+  };
+
+  const docTypeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+    receipt: Hash,
+    letter: BookOpen,
+    book_page: BookOpen,
+    form: Info,
+    handwritten: Mic,
+    table_document: FileImage,
+    unknown: Info,
+  };
+
+  return (
+    <div className="glass-card rounded-2xl p-6 space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-1">
+        <Brain className="h-5 w-5 text-violet-400" />
+        <h3 className="text-lg font-semibold text-white">AI Document Insights</h3>
+      </div>
+
+      {/* Language Detection */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <InsightCard title="Detected Language" iconColor="text-violet-400" bgColor="bg-violet-500/10">
+          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-500/10 text-violet-400 font-semibold text-sm">
+            {langCodeToLabel[ai.language.primary] || ai.language.primary}
+            <span className="text-xs opacity-70">({Math.round(ai.language.confidence * 100)}%)</span>
+          </span>
+          {ai.language.languages.length > 1 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {ai.language.languages.slice(1).map(l => (
+                <span key={l.code} className="text-xs px-2 py-0.5 rounded bg-slate-700/50 text-slate-400">
+                  {l.label} ({Math.round(l.proportion * 100)}%)
+                </span>
+              ))}
+            </div>
+          )}
+        </InsightCard>
+
+        <InsightCard title="Document Type" iconColor="text-emerald-400" bgColor="bg-emerald-500/10">
+          {(() => {
+            const Icon = docTypeIcons[ai.document_type.primary] || Info;
+            return (
+              <>
+                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 font-semibold text-sm">
+                  <Icon className="h-4 w-4" />
+                  {ai.document_type.primary.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                  <span className="text-xs opacity-70">({Math.round(ai.document_type.confidence * 100)}%)</span>
+                </span>
+                {Object.entries(ai.document_type.scores).filter(([, v]) => v > 0.05).length > 1 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {Object.entries(ai.document_type.scores)
+                      .filter(([, v]) => v > 0.05)
+                      .sort(([, a], [, b]) => b - a)
+                      .slice(1, 4)
+                      .map(([key, val]) => (
+                        <span key={key} className="text-xs px-2 py-0.5 rounded bg-slate-700/50 text-slate-400">
+                          {key.replace(/_/g, ' ')} ({Math.round(val * 100)}%)
+                        </span>
+                      ))}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </InsightCard>
+      </div>
+
+      {/* Content Stats */}
+      {ai.content && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <StatPill label="Words" value={ai.content.word_count.toLocaleString()} />
+          <StatPill label="Sentences" value={ai.content.sentence_count.toLocaleString()} />
+          <StatPill label="Avg Word Length" value={`${ai.content.avg_word_length} chars`} />
+          <StatPill label="Uniqueness" value={`${Math.round(ai.content.uniqueness_ratio * 100)}%`} />
+        </div>
+      )}
+
+      {/* Summary */}
+      {summary && summary.summary && (
+        <InsightCard title="AI Summary" iconColor="text-blue-400" bgColor="bg-blue-500/10">
+          {summary.title && <p className="font-semibold text-sm text-white mb-1">{summary.title}</p>}
+          <p className={`text-sm leading-relaxed ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>{summary.summary}</p>
+          {summary.keywords.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {summary.keywords.slice(0, 6).map((kw, i) => (
+                <span key={i} className={`text-xs px-2 py-0.5 rounded font-medium ${isDark ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
+                  {kw.word}
+                </span>
+              ))}
+            </div>
+          )}
+        </InsightCard>
+      )}
+
+      {/* Table Detection */}
+      {tableDet && tableDet.is_table && (
+        <div className={`rounded-xl p-4 border ${isDark ? 'bg-amber-500/5 border-amber-500/20' : 'bg-amber-50 border-amber-200'}`}>
+          <div className="flex items-center gap-2 mb-2">
+            <FileImage className="h-4 w-4 text-amber-400" />
+            <span className="text-sm font-semibold text-amber-400">Table Detected</span>
+          </div>
+          <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
+            Structure found: {tableDet.tables[0]?.rows} rows × {tableDet.tables[0]?.cols} columns
+          </p>
+        </div>
+      )}
+
+      {/* Recommendations */}
+      {(result as any).recommendations && (result as any).recommendations.recommendations?.length > 0 && (
+        <InsightCard title="Enhancement Recommendations" iconColor="text-amber-400" bgColor="bg-amber-500/10">
+          <div className="space-y-2">
+            {(result as any).recommendations.recommendations.map((rec: any, i: number) => (
+              <div key={i} className={`flex items-start gap-2 text-xs p-2 rounded-lg ${isDark ? 'bg-white/5' : 'bg-white'}`}>
+                <span className="text-amber-400 mt-0.5 shrink-0">●</span>
+                <span className={isDark ? 'text-slate-300' : 'text-gray-700'}>{rec.reason}</span>
+              </div>
+            ))}
+          </div>
+        </InsightCard>
+      )}
+    </div>
+  );
+}
+
+function InsightCard({ title, iconColor, bgColor, children }: {
+  title: string; iconColor?: string; bgColor?: string; children: React.ReactNode;
+}) {
+  return (
+    <div className={`rounded-xl p-4 ${bgColor || 'bg-white/5'} border border-slate-700/40`}>
+      <p className={`text-[10px] uppercase tracking-wider font-medium mb-2 ${iconColor || 'text-slate-400'}`}>{title}</p>
+      {children}
+    </div>
+  );
+}
+
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={`text-center p-3 rounded-xl bg-white/5`}>
+      <p className={`text-[10px] uppercase tracking-wider font-medium mb-1 text-slate-500`}>{label}</p>
+      <p className={`text-lg font-bold text-white tracking-tight`}>{value}</p>
+    </div>
+  );
+}
+
+/* ── Type imports (inline for component) ─────────────────────── */
+interface DocumentAnalysis {
+  language: { primary: string; confidence: number; languages: Array<{ code: string; label: string; proportion: number }>;
+    proportions: Record<string, number>; is_mixed: boolean; script_count: number; };
+  document_type: { primary: string; confidence: number; scores: Record<string, number>; };
+  content?: { word_count: number; sentence_count: number; avg_word_length: number; uniqueness_ratio: number; };
+  recommendations?: string[];
+}
+interface SummaryResult {
+  summary: string; title: string; keywords: Array<{ word: string }>;
+  confidence: number; method: string;
+}
+interface TableDetection {
+  is_table: boolean;
+  tables: Array<{ rows: number; cols: number; cells: string[][] }>;
 }

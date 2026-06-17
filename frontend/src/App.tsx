@@ -4,22 +4,25 @@
  * @see https://github.com/blacksmoke26
  */
 
-import {useEffect, useState} from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import client from '#/utils/apiClient';
-import {ThemeProvider, useTheme} from '#/context/ThemeContext';
-import {ToastProvider} from '#/context/ToastContext';
-import {OcrPage} from '#/pages/OcrPage';
-import {PdfPage} from '#/pages/PdfPage';
-import {SystemPage} from '#/pages/SystemPage';
-import {StatsPage} from '#/pages/StatsPage';
-import {ExportPage} from '#/pages/ExportPage';
+import { ThemeProvider, useTheme } from '#/context/ThemeContext';
+import { ToastProvider } from '#/context/ToastContext';
+import { OcrPage } from '#/pages/OcrPage';
+import { PdfPage } from '#/pages/PdfPage';
+import { SystemPage } from '#/pages/SystemPage';
+import { StatsPage } from '#/pages/StatsPage';
+import { ExportPage } from '#/pages/ExportPage';
 import {
   Activity,
   BarChart3,
+  Brain,
+  Clock,
   Cpu,
   Download,
   FileText,
   Globe,
+  Loader2,
   Moon,
   ScanLine,
   Settings2,
@@ -29,16 +32,18 @@ import {
   UploadCloud,
   Zap,
 } from 'lucide-react';
-import type {OcrResult, PdfOcrResponse} from '#/types/api';
+import type {OcrResult, PdfOcrResponse, HistoryResponse} from '#/types/api';
+import { getHistory } from '#/utils/api/analysis';
 
-type TabKey = 'ocr' | 'pdf' | 'stats' | 'system' | 'export';
+type TabKey = 'ocr' | 'pdf' | 'insights' | 'stats' | 'system' | 'export';
 
 const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { key: 'ocr',     label: 'OCR',      icon: UploadCloud },
-  { key: 'pdf',     label: 'PDF OCR',   icon: FileText },
-  { key: 'stats',   label: 'Analytics', icon: BarChart3 },
-  { key: 'system',  label: 'System',    icon: Settings2 },
-  { key: 'export',  label: 'Export',    icon: Download },
+  { key: 'ocr',      label: 'OCR',       icon: UploadCloud },
+  { key: 'pdf',      label: 'PDF OCR',    icon: FileText },
+  { key: 'insights', label: 'AI Insights',icon: Brain },
+  { key: 'stats',    label: 'Analytics',   icon: BarChart3 },
+  { key: 'system',   label: 'System',      icon: Settings2 },
+  { key: 'export',   label: 'Export',      icon: Download },
 ];
 
 const QUICK_STATS = [
@@ -201,6 +206,7 @@ function Shell() {
               <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
                 {activeTab === 'ocr' && 'Upload an image to extract Urdu text'}
                 {activeTab === 'pdf' && 'Process PDF documents for OCR'}
+                {activeTab === 'insights' && 'AI-powered document analysis, summaries & history'}
                 {activeTab === 'stats' && 'Real-time server performance metrics'}
                 {activeTab === 'system' && 'Server health and configuration'}
                 {activeTab === 'export' && 'Export extracted data in multiple formats'}
@@ -226,6 +232,7 @@ function Shell() {
         <div className={`flex-1 p-6 lg:p-8 overflow-auto ${isLoaded ? '' : 'opacity-0'}`}>
           {activeTab === 'ocr'  && <OcrPage onResult={setLastOcrResult} />}
           {activeTab === 'pdf'  && <PdfPage onPdfResult={setLastPdfOcrResult} />}
+          {activeTab === 'insights' && <InsightsPage />}
           {activeTab === 'system' && <SystemPage />}
           {activeTab === 'stats' && <StatsPage />}
           {activeTab === 'export' && <ExportPage ocrResult={lastOcrResult} pdfOcrResult={lastPdfOcrResult} />}
@@ -273,6 +280,126 @@ function App() {
       </ToastProvider>
     </ThemeProvider>
   );
+}
+
+/* ── AI Insights Page (new) ─────────────────────── */
+
+function InsightsPage() {
+  const [history, setHistory] = useState<HistoryResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const isDark = true;
+
+  useEffect(() => {
+    getHistory(20).then((d) => { setHistory(d); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="h-8 w-8 text-violet-400 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!history) {
+    return (
+      <div className="text-center py-16">
+        <Brain className="h-12 w-12 text-slate-600 mx-auto mb-4" />
+        <p className="text-sm text-slate-500">No insights data available yet. Run some OCR first.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-6">
+      {/* Hero */}
+      <div className="relative overflow-hidden rounded-2xl border border-violet-500/10 bg-gradient-to-br from-violet-500/5 via-transparent to-purple-500/5 px-6 py-8 sm:px-10 sm:py-10 text-center">
+        <Brain className="h-8 w-8 text-violet-400 mx-auto mb-3" />
+        <h2 className="text-2xl font-bold tracking-tight mb-1">AI Insights Dashboard</h2>
+        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+          AI-powered document analysis, processing history, and smart recommendations.
+        </p>
+      </div>
+
+      {/* Stats Summary */}
+      {history.stats && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <StatBox label="Total Operations" value={history.stats.total_operations.toLocaleString()} color="text-violet-400" />
+          <StatBox label="Avg Confidence" value={history.stats.avg_confidence ? `${Math.round(history.stats.avg_confidence * 100)}%` : 'N/A'} color="text-emerald-400" />
+          <StatBox label="Total Lines" value={history.stats.total_lines_extracted.toLocaleString()} color="text-blue-400" />
+          <StatBox label="Avg Processing" value={`${Math.round(history.stats.avg_processing_time_ms)}ms`} color="text-amber-400" />
+        </div>
+      )}
+
+      {/* Operation Breakdown */}
+      {history.stats && history.stats.by_operation && Object.keys(history.stats.by_operation).length > 0 && (
+        <div className="glass-card rounded-2xl p-6">
+          <h3 className="text-sm font-semibold text-white mb-4 uppercase tracking-wider">Operations Breakdown</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {Object.entries(history.stats.by_operation).map(([op, count]) => (
+              <div key={op} className={`p-4 rounded-xl ${isDark ? 'bg-white/5' : 'bg-gray-50'}`}>
+                <p className={`text-[10px] uppercase tracking-wider font-medium mb-1 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{op.replace(/_/g, ' ')}</p>
+                <p className="text-2xl font-bold text-white">{count.toLocaleString()}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recent Activity */}
+      {history.entries.length > 0 && (
+        <div className="glass-card rounded-2xl p-6">
+          <h3 className="text-sm font-semibold text-white mb-4 uppercase tracking-wider">Recent Activity</h3>
+          <div className="space-y-2">
+            {history.entries.slice(0, 10).map((entry) => (
+              <div key={entry.id} className={`flex items-center gap-4 px-4 py-3 rounded-xl transition-colors ${isDark ? 'bg-white/[0.02] hover:bg-white/[0.04]' : 'bg-gray-50 hover:bg-gray-100'}`}>
+                <div className={`shrink-0 p-2 rounded-lg ${
+                  entry.operation.includes('ocr') ? 'bg-violet-500/10' :
+                  entry.operation.includes('pdf') ? 'bg-blue-500/10' : 'bg-slate-500/10'
+                }`}>
+                  <Clock className={`h-4 w-4 ${
+                    entry.operation.includes('ocr') ? 'text-violet-400' :
+                    entry.operation.includes('pdf') ? 'text-blue-400' : 'text-slate-400'
+                  }`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium truncate ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>{entry.filename}</p>
+                  <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
+                    {entry.operation.replace(/_/g, ' ')} · {Math.round(entry.processing_time_ms)}ms · {entry.lines_detected} lines
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  {entry.confidence_mean && (
+                    <span className={`text-xs font-semibold ${
+                      entry.confidence_mean >= 0.7 ? 'text-emerald-400' :
+                      entry.confidence_mean >= 0.4 ? 'text-amber-400' : 'text-red-400'
+                    }`}>{Math.round(entry.confidence_mean * 100)}%</span>
+                  )}
+                  <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-600' : 'text-gray-400'}`}>{formatTime(entry.timestamp)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatBox({ label, value, color }: { label: string; value: string | number; color: string }) {
+  return (
+    <div className={`glass-card rounded-2xl p-5`}>
+      <p className="text-[10px] uppercase tracking-wider font-medium mb-2 text-slate-500">{label}</p>
+      <p className={`text-2xl font-bold ${color} tracking-tight`}>{value}</p>
+    </div>
+  );
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts * 1000);
+  const h = d.getHours().toString().padStart(2, '0');
+  const m = d.getMinutes().toString().padStart(2, '0');
+  return `${h}:${m}`;
 }
 
 export default App;

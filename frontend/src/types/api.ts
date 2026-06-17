@@ -285,3 +285,40 @@ export interface UploadProgress {
 export const ALLOWED_EXTENSIONS = [
   'jpg', 'jpeg', 'png', 'bmp', 'tiff', 'tif', 'webp', 'gif', 'pdf',
 ];
+
+// ─── History Types (from analysis API) ────────────────────────
+
+export interface HistoryEntry {
+  id: string;
+  timestamp: number;
+  operation: string;
+  filename: string;
+  status: string;
+  lines_detected: number;
+  processing_time_ms: number;
+  confidence_mean?: number;
+  confidence_min?: number;
+  language?: string | null;
+  document_type?: string | null;
+  file_size_kb: number;
+  device: string;
+}
+
+export interface HistoryStats {
+  total_operations: number;
+  by_status: Record<string, number>;
+  by_operation: Record<string, number>;
+  total_lines_extracted: number;
+  total_processing_time_ms: number;
+  avg_processing_time_ms: number;
+  avg_confidence?: number;
+  unique_files: number;
+  time_window_seconds: number;
+}
+
+export interface HistoryResponse {
+  status: string;
+  stats: HistoryStats;
+  entries: HistoryEntry[];
+  count: number;
+}

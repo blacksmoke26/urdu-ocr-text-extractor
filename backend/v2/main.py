@@ -104,7 +104,13 @@ def create_app() -> FastAPI:
             RateLimitMiddleware,
             max_requests=RATE_LIMIT_REQUESTS,
             window_seconds=RATE_LIMIT_WINDOW,
-            exclude_paths=["/api/v2/progress/"],
+            exclude_paths=[
+                "/api/v2/progress/",
+                "/api/v2/health",
+                "/api/v2/live-stats/",
+                "/api/v2/ws/",
+                "/api/v2/metrics/prometheus",
+            ],
         )
 
     # Auth middleware
@@ -125,13 +131,14 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
 
     # Include routers
-    from routes import ocr_router, pdf_router, export_router, system_router, realtime_router
+    from routes import ocr_router, pdf_router, export_router, system_router, realtime_router, analysis_router
 
     app.include_router(ocr_router)
     app.include_router(pdf_router)
     app.include_router(export_router)
     app.include_router(system_router)
     app.include_router(realtime_router)
+    app.include_router(analysis_router)
 
     return app
 
