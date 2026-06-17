@@ -109,7 +109,7 @@ class ResultCache:
         return {
             "enabled": self.enabled,
             "ttl_seconds": self.ttl,
-            "entries_in_memory": len(self._cache),
+            "entries": len(self._cache),
             "hits": self._hits,
             "misses": self._misses,
             "hit_rate_pct": hit_rate,

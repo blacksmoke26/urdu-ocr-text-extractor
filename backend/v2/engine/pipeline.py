@@ -107,10 +107,11 @@ def preprocess_image(image: Image.Image, conf_threshold: float, img_size: int) -
         det_confs = det_results[0].boxes.conf.cpu().numpy().tolist()
 
     # Annotated image
-    annotated = image.copy()
+    annotated = image.convert("RGB").copy()
     draw = ImageDraw.Draw(annotated)
     for box in boxes:
-        draw.rectangle(box, fill=None, outline=tuple(np_random.randint(0, 255, 3)), width=5)
+        outline = (int(np_random.randint(0, 255)), int(np_random.randint(0, 255)), int(np_random.randint(0, 255)))
+        draw.rectangle(box, fill=None, outline=outline, width=5)
 
     buf = io.BytesIO()
     annotated.save(buf, format="PNG")
@@ -207,10 +208,11 @@ def run_ocr_pipeline(image: Image.Image, filename: str, file_type: str,
     device = models["device"]
     from numpy import random as np_random
     from PIL import ImageDraw
-    annotated = image.copy()
+    annotated = image.convert("RGB").copy()
     draw = ImageDraw.Draw(annotated)
     for box in boxes:
-        draw.rectangle(box, fill=None, outline=tuple(np_random.randint(0, 255, 3)), width=5)
+        outline = (int(np_random.randint(0, 255)), int(np_random.randint(0, 255)), int(np_random.randint(0, 255)))
+        draw.rectangle(box, fill=None, outline=outline, width=5)
     buf = io.BytesIO()
     annotated.save(buf, format="PNG")
     buf.seek(0)
