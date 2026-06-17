@@ -11,7 +11,7 @@
 
 import { upload, downloadBinary } from '../apiClient';
 import client from '../apiClient';
-import type { PdfInfo, PdfExtractResponse, PdfOcrResponse } from '#/types/api';
+import type { PdfInfo, PdfExtractResponse, PdfOcrOptions, PdfOcrResponse } from '#/types/api';
 
 /** Retrieve metadata (pages, author, dimensions) from a PDF. */
 export const pdfInfo = (file: File): Promise<PdfInfo> =>
@@ -55,15 +55,38 @@ export const pdfOcr = (
   textCleaning = 'true',
   onProgress?: (pct: number) => void,
   taskId?: string,
-): Promise<PdfOcrResponse> =>
-  upload<PdfOcrResponse>('/pdf/ocr', file, 'file', {
+  advancedOptions?: PdfOcrOptions,
+): Promise<PdfOcrResponse> => {
+  const formData: Record<string, string | number | boolean> = {
     from_page: fromPage,
     to_page: toPage,
     conf_threshold: confThreshold,
     img_size: imgSize,
     text_cleaning: textCleaning,
     ...(taskId ? { task_id: taskId } : {}),
-  }, onProgress);
+  };
+
+  // Add advanced options when provided
+  if (advancedOptions) {
+    const { use_cache, device, det_type, det_conf, mllm_model, layout_analysis, post_processing, preprocess_options, ...baseOpts } = advancedOptions;
+    Object.assign(formData, baseOpts);
+    if (use_cache !== undefined) formData.use_cache = use_cache ? 'true' : 'false';
+    if (device) formData.device = device;
+    if (det_type) formData.det_type = det_type;
+    if (det_conf !== undefined) formData.det_conf = det_conf;
+    if (mllm_model) formData.mllm_model = mllm_model;
+    if (layout_analysis !== undefined) formData.layout_analysis = layout_analysis ? 'true' : 'false';
+    if (post_processing) formData.post_processing = post_processing;
+    if (preprocess_options) formData.preprocess_options = JSON.stringify(preprocess_options);
+  }
+
+  // Set to_page only when provided
+  if (toPage !== undefined) {
+    formData.to_page = toPage;
+  }
+
+  return upload<PdfOcrResponse>('/pdf/ocr', file, 'file', formData, onProgress);
+};
 
 export default client;
 

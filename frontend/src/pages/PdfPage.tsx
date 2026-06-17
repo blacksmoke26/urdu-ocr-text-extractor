@@ -12,9 +12,10 @@
  */
 
 import { useRef, useState } from 'react';
-import { Clock, FileText, Scissors, Search, Square, Timer, UploadCloud, Eye, FileJson } from 'lucide-react';
+import { Clock, FileText, Scissors, Search, Square, Timer, UploadCloud, Eye, FileJson, ChevronDown, ChevronUp, SlidersHorizontal, Cpu, Zap, EyeOff, LayoutGrid, Wand2, Sparkles } from 'lucide-react';
 import { cancelPdfOcr, pdfExtract, pdfInfo, pdfOcr } from '#/utils/api/pdf';
 import { Dialog, DialogBody, DialogContent } from '#/components/ui/Dialog';
+import { SelectAdvanced } from '#/components/ui/SelectAdvanced';
 import { useToast } from '#/context/ToastContext';
 import { formatBytes } from '#/utils/file';
 import type {PdfExtractResponse, PdfInfo, PdfOcrPageResult, PdfOcrResponse} from '#/types/api';
@@ -57,6 +58,15 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
   const [confThreshold, setConfThreshold] = useState(0.2);
   const [imgSize, setImgSize] = useState(1280);
   const [textCleaning, setTextCleaning] = useState(true);
+
+  // Advanced options state
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [useCache, setUseCache] = useState(true);
+  const [device, setDevice] = useState<'cpu' | 'cuda'>('cuda');
+  const [detType, setDetType] = useState<'yolo' | 'detr' | 'mllm'>('yolo');
+  const [detConf, setDetConf] = useState(0.5);
+  const [layoutAnalysis, setLayoutAnalysis] = useState(false);
+  const [postProcessing, setPostProcessing] = useState(true);
 
   const { addToast } = useToast();
 
@@ -239,7 +249,15 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
     }
 
     try {
-      const data = await pdfOcr(file, pageRange.from, pageRange.to ? Number(pageRange.to) : undefined, confThreshold, imgSize, String(textCleaning), undefined, taskId);
+      const advancedOptions = {
+        use_cache: useCache,
+        device,
+        det_type: detType,
+        det_conf: detConf,
+        layout_analysis: layoutAnalysis,
+        post_processing: postProcessing ? 'default' : '',
+      };
+      const data = await pdfOcr(file, pageRange.from, pageRange.to ? Number(pageRange.to) : undefined, confThreshold, imgSize, String(textCleaning), undefined, taskId, advancedOptions);
       // Clean up WebSocket on completion
       if (ws && ws.readyState === WebSocket.OPEN) ws.send('unsubscribe');
       clearInterval(tickInterval);
@@ -563,26 +581,181 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
             </div>
           )}
 
-          {/* OCR options */}
+          {/* OCR options — Single merged panel */}
           {tab === 'ocr' && (
-            <div className="glass-card rounded-2xl p-5">
-              <div className={`text-xs font-medium uppercase tracking-wider mb-3 ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>OCR Settings</div>
-              <div className="flex flex-wrap gap-6 text-sm">
-                <div>
-                  <label className={`block mb-2 text-xs ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Confidence Threshold</label>
-                  <input type="number" step={0.1} min={0} max={1} value={confThreshold} onChange={(e) => setConfThreshold(Number(e.target.value))} className={`w-24 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
+            <div className="space-y-3">
+              <div
+                className="glass-card rounded-2xl p-5"
+                style={{ animation: 'float-up 0.4s ease-out both' }}
+              >
+                {/* Header row with title and collapse toggle */}
+                <div className="flex items-center justify-between mb-4">
+                  <span className={`text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
+                    OCR Settings
+                  </span>
+                  <button
+                    onClick={() => setAdvancedOpen(!advancedOpen)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all duration-300 cursor-pointer ${
+                      advancedOpen
+                        ? isDark
+                          ? 'border-violet-500/30 bg-violet-500/15 text-violet-400'
+                          : 'border-violet-400/40 bg-violet-50 text-violet-600'
+                        : isDark
+                          ? 'border-slate-700/50 bg-white/[0.03] text-slate-500 hover:border-slate-600 hover:text-slate-300'
+                          : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                    }`}
+                  >
+                    <SlidersHorizontal className={`h-3 w-3 transition-transform duration-300 ${advancedOpen ? 'rotate-90' : ''}`} />
+                    Advanced
+                    <ChevronDown className={`h-3 w-3 transition-transform duration-300 ${advancedOpen ? 'rotate-180' : ''}`} />
+                  </button>
                 </div>
-                <div>
-                  <label className={`block mb-2 text-xs ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>Image Size</label>
-                  <input type="number" value={imgSize} onChange={(e) => setImgSize(Number(e.target.value))} className={`w-24 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
-                </div>
-                <label className="flex items-center gap-2 cursor-pointer pt-1">
-                  <div className={`relative w-9 h-5 rounded-full transition-colors ${textCleaning ? 'bg-violet-500' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`}>
-                    <input type="checkbox" checked={textCleaning} onChange={() => setTextCleaning(!textCleaning)} className="sr-only peer" />
-                    <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${textCleaning ? 'translate-x-4' : ''}`} />
+
+                {/* Basic settings */}
+                <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+                  {/* Confidence Threshold */}
+                  <div>
+                    <label className={`block mb-1.5 text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
+                      Confidence
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step={0.1}
+                        min={0}
+                        max={1}
+                        value={confThreshold}
+                        onChange={(e) => setConfThreshold(Number(e.target.value))}
+                        className={`w-24 border rounded-xl px-3 py-2 text-sm ${isDark ? 'bg-slate-900/60 border-slate-700/50 text-white' : 'bg-white border-gray-200 text-gray-900'} focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all`}
+                      />
+                      <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs ${isDark ? 'text-slate-600' : 'text-gray-400'}`}>%</span>
+                    </div>
                   </div>
-                  <span className={isDark ? 'text-slate-300' : 'text-gray-700'}>Text Cleaning</span>
-                </label>
+
+                  {/* Image Size */}
+                  <div>
+                    <label className={`block mb-1.5 text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
+                      Image Size
+                    </label>
+                    <input
+                      type="number"
+                      value={imgSize}
+                      onChange={(e) => setImgSize(Number(e.target.value))}
+                      className={`w-24 border rounded-xl px-3 py-2 text-sm ${isDark ? 'bg-slate-900/60 border-slate-700/50 text-white' : 'bg-white border-gray-200 text-gray-900'} focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all`}
+                    />
+                  </div>
+
+                  {/* Divider */}
+                  <div className={`w-px h-8 ${isDark ? 'bg-slate-700/50' : 'bg-gray-200'}`} />
+
+                  {/* Text Cleaning Toggle */}
+                  <label className="flex items-center gap-2.5 cursor-pointer group">
+                    <div className={`relative w-10 h-5.5 rounded-full transition-all duration-300 ${textCleaning ? 'bg-violet-500 shadow-lg shadow-violet-500/40' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`}>
+                      <input type="checkbox" checked={textCleaning} onChange={() => setTextCleaning(!textCleaning)} className="sr-only peer" />
+                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 ${textCleaning ? 'translate-x-4.5' : ''}`} />
+                    </div>
+                    <Wand2 className={`h-3.5 w-3.5 transition-colors ${textCleaning ? 'text-violet-400' : isDark ? 'text-slate-600 group-hover:text-slate-500' : 'text-gray-400'}`} />
+                    <span className={`text-sm ${isDark ? 'text-slate-300 group-hover:text-slate-200' : 'text-gray-700'}`}>Text Cleaning</span>
+                  </label>
+                </div>
+
+                {/* Advanced section — animated expand/collapse */}
+                {advancedOpen && (
+                  <div
+                    className="mt-5 pt-5 border-t space-y-5"
+                    style={{ animation: 'float-up 0.25s ease-out both' }}
+                  >
+                    {/* Model + Det Conf + Device row */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      {/* Model Type */}
+                      <div>
+                        <label className={`block mb-1.5 text-[11px] font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
+                          Model
+                        </label>
+                        <SelectAdvanced
+                          value={detType}
+                          onChange={(v) => setDetType(v as 'yolo' | 'detr' | 'mllm')}
+                          placeholder="Select model"
+                          triggerWidth="100%"
+                          options={[
+                            { value: 'yolo', label: 'YOLO' },
+                            { value: 'detr', label: 'DETR' },
+                            { value: 'mllm', label: 'MLLM' },
+                          ]}
+                        />
+                      </div>
+
+                      {/* Detection Confidence */}
+                      <div>
+                        <label className={`block mb-1.5 text-[11px] font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
+                          Det. Conf.
+                        </label>
+                        <input
+                          type="number"
+                          step={0.05}
+                          min={0}
+                          max={1}
+                          value={detConf}
+                          onChange={(e) => setDetConf(Number(e.target.value))}
+                          className={`w-full border rounded-xl px-3 py-2 text-sm ${isDark ? 'bg-slate-900/60 border-slate-700/50 text-white' : 'bg-white border-gray-200 text-gray-900'} focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all`}
+                        />
+                      </div>
+
+                      {/* Device */}
+                      <div>
+                        <label className={`block mb-1.5 text-[11px] font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
+                          Device
+                        </label>
+                        <SelectAdvanced
+                          value={device}
+                          onChange={(v) => setDevice(v as 'cpu' | 'cuda')}
+                          placeholder="Select device"
+                          triggerWidth="100%"
+                          options={[
+                            { value: 'cuda', label: 'CUDA (GPU)' },
+                            { value: 'cpu', label: 'CPU' },
+                          ]}
+                        />
+                      </div>
+
+                      {/* Divider between numeric + toggles columns */}
+                      <div className={`hidden sm:block w-px self-stretch ${isDark ? 'bg-slate-700/50' : 'bg-gray-200'}`} />
+                    </div>
+
+                    {/* Feature Toggles */}
+                    <div className="flex flex-wrap gap-x-6 gap-y-3">
+                      {/* Cache Results */}
+                      <label className="flex items-center gap-2 cursor-pointer group">
+                        <div className={`relative w-9 h-5 rounded-full transition-all duration-300 ${useCache ? 'bg-violet-500 shadow-md shadow-violet-500/40' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`}>
+                          <input type="checkbox" checked={useCache} onChange={() => setUseCache(!useCache)} className="sr-only peer" />
+                          <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 ${useCache ? 'translate-x-4' : ''}`} />
+                        </div>
+                        <Sparkles className={`h-3.5 w-3.5 transition-colors ${useCache ? 'text-violet-400' : isDark ? 'text-slate-600 group-hover:text-slate-500' : 'text-gray-400'}`} />
+                        <span className={`text-sm ${isDark ? 'text-slate-300 group-hover:text-slate-200' : 'text-gray-700'}`}>Cache</span>
+                      </label>
+
+                      {/* Layout Analysis */}
+                      <label className="flex items-center gap-2 cursor-pointer group">
+                        <div className={`relative w-9 h-5 rounded-full transition-all duration-300 ${layoutAnalysis ? 'bg-violet-500 shadow-md shadow-violet-500/40' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`}>
+                          <input type="checkbox" checked={layoutAnalysis} onChange={() => setLayoutAnalysis(!layoutAnalysis)} className="sr-only peer" />
+                          <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 ${layoutAnalysis ? 'translate-x-4' : ''}`} />
+                        </div>
+                        <LayoutGrid className={`h-3.5 w-3.5 transition-colors ${layoutAnalysis ? 'text-violet-400' : isDark ? 'text-slate-600 group-hover:text-slate-500' : 'text-gray-400'}`} />
+                        <span className={`text-sm ${isDark ? 'text-slate-300 group-hover:text-slate-200' : 'text-gray-700'}`}>Layout</span>
+                      </label>
+
+                      {/* Post Processing */}
+                      <label className="flex items-center gap-2 cursor-pointer group">
+                        <div className={`relative w-9 h-5 rounded-full transition-all duration-300 ${postProcessing ? 'bg-violet-500 shadow-md shadow-violet-500/40' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`}>
+                          <input type="checkbox" checked={postProcessing} onChange={() => setPostProcessing(!postProcessing)} className="sr-only peer" />
+                          <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 ${postProcessing ? 'translate-x-4' : ''}`} />
+                        </div>
+                        <Wand2 className={`h-3.5 w-3.5 transition-colors ${postProcessing ? 'text-violet-400' : isDark ? 'text-slate-600 group-hover:text-slate-500' : 'text-gray-400'}`} />
+                        <span className={`text-sm ${isDark ? 'text-slate-300 group-hover:text-slate-200' : 'text-gray-700'}`}>Post Process</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -618,10 +791,12 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
 
             {/* Progress */}
             {loading && (tab === 'ocr' || tab === 'extract') && (
-              <div className={`p-4 rounded-xl ${isDark ? 'bg-white/[0.02]' : 'bg-gray-50'}`}>
+              <div className={`p-4 rounded-xl ${isDark ? 'bg-white/[0.02]' : 'bg-gray-50'}`}
+                style={{ animation: 'float-up 0.35s ease-out' }}
+              >
                 <div className={`h-2 rounded-full overflow-hidden mb-3 ${isDark ? 'bg-slate-800' : 'bg-gray-200'}`}>
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-500"
+                    className="h-full rounded-full bg-gradient-to-r from-violet-500 via-purple-500 to-violet-500 transition-all duration-700 ease-out bg-[length:200%_100%] animate-[gradientShift_3s_ease_infinite]"
                     style={{ width: `${progressTotalPages > 1 ? Math.min(100, (pagesCompleted / progressTotalPages) * 100) : 0}%` }}
                   />
                 </div>

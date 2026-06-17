@@ -63,12 +63,63 @@
     to { opacity: 1; transform: scale(1); }
   }
 
+  @keyframes spinRing {
+    0% { stroke-dashoffset: 440; }
+    50% { stroke-dashoffset: 110; }
+    100% { stroke-dashoffset: 440; }
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0) scale(1); opacity: 0.6; }
+    50% { transform: translateY(-20px) scale(1.2); opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(40px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes shimmerAnim {
+    0% { background-position: -200% center; }
+    100% { background-position: 200% center; }
+  }
+
+  @keyframes breathe {
+    0%, 100% { opacity: 0.4; transform: scale(0.98); }
+    50% { opacity: 0.8; transform: scale(1.02); }
+  }
+
+  @keyframes cardFloatIn {
+    from { opacity: 0; transform: translateY(24px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes particleDrift {
+    0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { transform: translateY(-60px) rotate(360deg); opacity: 0; }
+  }
+
+  @keyframes gradientBorder {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
   --animate-fade-in: fadeIn 0.4s ease-out;
   --animate-slide-left: slideInLeft 0.3s ease-out;
   --animate-pulse-glow: pulse-glow 2s ease-in-out infinite;
   --animate-gradient-shift: gradientShift 6s ease infinite;
   --animate-float-up: floatUp 0.5s ease-out;
   --animate-count-up: countUp 0.3s ease-out;
+  --animate-spin-ring: spinRing 2s linear infinite;
+  --animate-float: float 3s ease-in-out infinite;
+  --animate-slide-up: slideUp 0.6s ease-out;
+  --animate-shimmer: shimmerAnim 1.5s linear infinite;
+  --animate-breathe: breathe 3s ease-in-out infinite;
+  --animate-card-float: cardFloatIn 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-particle-drift: particleDrift 4s ease-in-out infinite;
 }
 
 /* ===== Base styles ===== */
@@ -175,3 +226,105 @@ html.light,
   transition-duration: 150ms;
   transition-timing-function: ease;
 }
+
+/* ===== Processing ring animation ===== */
+.processing-ring {
+  --ring-size: 80px;
+  --stroke-width: 4;
+  --circumference: calc(3.14159 * (var(--ring-size) - var(--stroke-width) * 2));
+}
+
+/* ===== Gradient border glow effect ===== */
+.gradient-border-glow {
+  position: relative;
+  background: linear-gradient(var(--bg-card, rgba(30, 41, 59, 0.35)), var(--bg-card, rgba(30, 41, 59, 0.35))) padding-box,
+    linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(59, 130, 246, 0.5), rgba(16, 185, 129, 0.5), rgba(139, 92, 246, 0.5));
+  background-size: 100% 100%, 300% 300%;
+  border-radius: inherit;
+  animation: gradientBorder 4s ease infinite;
+}
+
+.gradient-border-glow.light-mode {
+  background: linear-gradient(var(--bg-card, rgba(255, 255, 255, 0.7)), var(--bg-card, rgba(255, 255, 255, 0.7))) padding-box,
+    linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(59, 130, 246, 0.3), rgba(16, 185, 129, 0.3), rgba(139, 92, 246, 0.3));
+}
+
+/* ===== Shimmer loading placeholder ===== */
+.shimmer-effect {
+  background: linear-gradient(90deg, transparent 25%, rgba(139, 92, 246, 0.08) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: shimmerAnim 1.5s ease-in-out infinite;
+}
+
+/* ===== Thumbnail hover effect ===== */
+.thumb-card {
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.thumb-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 12px 32px rgba(139, 92, 246, 0.15);
+}
+
+/* ===== Floating particles container ===== */
+.particles-container {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.particle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(139, 92, 246, 0.5);
+  animation: particleDrift var(--drift-duration, 3s) ease-in-out infinite;
+  animation-delay: var(--drift-delay, 0s);
+  left: var(--left-pos, 50%);
+  top: var(--top-pos, 80%);
+}
+
+/* ===== Slider thumb custom styles ===== */
+.enhancement-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.3), rgba(139, 92, 246, 0.6));
+  outline: none;
+  cursor: pointer;
+}
+.enhancement-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #a78bfa, #8b5cf6);
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.enhancement-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 14px rgba(139, 92, 246, 0.7);
+}
+.enhancement-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #a78bfa, #8b5cf6);
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
+  cursor: pointer;
+  border: none;
+}
+
+/* ===== Staggered animation delays ===== */
+.stagger-1 { animation-delay: 0.1s; }
+.stagger-2 { animation-delay: 0.2s; }
+.stagger-3 { animation-delay: 0.3s; }
+.stagger-4 { animation-delay: 0.4s; }
+.stagger-5 { animation-delay: 0.5s; }

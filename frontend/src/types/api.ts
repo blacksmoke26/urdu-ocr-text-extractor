@@ -64,6 +64,18 @@ export interface SingleOcrParams {
   text_cleaning?: boolean | string;
 }
 
+/** Advanced OCR options for PDF and image OCR endpoints. */
+export interface PdfOcrOptions extends SingleOcrParams {
+  use_cache?: boolean;
+  device?: 'cpu' | 'cuda';
+  det_type?: 'yolo' | 'detr' | 'mllm';
+  det_conf?: number;
+  mllm_model?: string;
+  layout_analysis?: boolean;
+  post_processing?: string;
+  preprocess_options?: EnhanceOptions;
+}
+
 /** Parameters for batch OCR uploads. */
 export interface BatchOcrParams extends SingleOcrParams {
   use_cache?: boolean;

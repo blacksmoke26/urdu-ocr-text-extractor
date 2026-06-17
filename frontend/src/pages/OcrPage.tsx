@@ -4,64 +4,216 @@
  * @see https://github.com/blacksmoke26
  */
 
-import { useCallback, useRef, useState, useEffect } from 'react';
-import { Upload, FileImage, Copy, CheckCircle2, AlertTriangle, Loader2, Settings2, Sparkles, Image as ImageIcon, ClipboardPaste, Brain, BookOpen, Mic, Hash, Info } from 'lucide-react';
-import { ocrSingle, ocrEnhanced } from '#/utils/api/ocr';
-import type { OcrResult, OcrLine, ConfidenceStats } from '#/types/api';
+import { useCallback, useRef, useState, useEffect, useMemo } from 'react';
+import {
+  Upload, FileImage, Copy, CheckCircle2, AlertTriangle, Loader2, Settings2, Sparkles, Image as ImageIcon,
+  ClipboardPaste, Brain, BookOpen, Mic, Hash, Info, X, SlidersHorizontal, ChevronDown, ChevronUp,
+  Grid3X3, Trash2, ZoomIn, RotateCw, Minus, Plus, Layers, Wand2, Sun, Moon, Eye, FileText,
+} from 'lucide-react';
+import { ocrSingle, ocrEnhanced, ocrBatch } from '#/utils/api/ocr';
+import type { OcrResult, OcrLine, ConfidenceStats, BatchOcrResponse } from '#/types/api';
 import { useToast } from '#/context/ToastContext';
 import { formatBytes, isImageFile } from '#/utils/file';
-import type { UploadProgress } from '#/types/api';
 
 const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/gif'];
+
+// ─── Enhancement presets ────────────────────────────────────────
+
+interface Enhancements {
+  toggles: Record<string, boolean>;
+  sliders: Record<string, number | null>;
+}
+
+const defaultEnhancements: Enhancements = {
+  toggles: { autoContrast: false, sharpen: false, denoise: false, normBg: false, saturate: false, blurRemoval: false },
+  sliders: { brightness: null, contrast: null, gamma: null, edgeEnhance: null },
+};
+
+const toggleDefs = [
+  { key: 'autoContrast', label: 'Auto Contrast', icon: Sun, desc: 'Adjust brightness/contrast' },
+  { key: 'sharpen', label: 'Sharpen', icon: ZoomIn, desc: 'Enhance edge clarity' },
+  { key: 'denoise', label: 'Denoise', icon: Wand2, desc: 'Reduce image noise' },
+  { key: 'normBg', label: 'Normalize BG', icon: Layers, desc: 'Uniform background' },
+  { key: 'saturate', label: 'Saturation', icon: Eye, desc: 'Boost color intensity' },
+  { key: 'blurRemoval', label: 'Deblur', icon: RotateCw, desc: 'Reduce motion blur' },
+];
+
+const sliderDefs = [
+  { key: 'brightness', label: 'Brightness', min: -100, max: 100, step: 5, unit: '' },
+  { key: 'contrast', label: 'Contrast', min: -100, max: 100, step: 5, unit: '' },
+  { key: 'gamma', label: 'Gamma', min: 20, max: 200, step: 10, unit: '' },
+  { key: 'edgeEnhance', label: 'Edge Enhance', min: 0, max: 100, step: 5, unit: '' },
+];
+
+// ─── Per-file result type ───────────────────────────────────────
+
+interface FileResult {
+  file: File;
+  preview: string;
+  ocrResult: OcrResult | null;
+  status: 'pending' | 'processing' | 'done' | 'error';
+  errorMsg?: string;
+}
+
+// ─── CSS filter computation for realtime preview ────────────────
+
+function computeCssFilters(e: Enhancements): string {
+  const parts: string[] = [];
+  if (e.sliders.brightness != null) parts.push(`brightness(${1 + e.sliders.brightness / 100})`);
+  if (e.sliders.contrast != null) parts.push(`contrast(${1 + e.sliders.contrast / 100})`);
+  if (e.toggles.saturate) parts.push('saturate(1.5)');
+  if (e.sliders.gamma != null) parts.push(`gamma(${e.sliders.gamma / 100})`); // CSS doesn't have gamma, approximate with brightness curve
+  if (e.toggles.sharpen) parts.push('contrast(1.1)'); // Approximation
+  return parts.length ? parts.join(' ') : 'none';
+}
+
+function computeEnhanceOptions(e: Enhancements): NonNullable<Parameters<typeof ocrEnhanced>[1]> | undefined {
+  const opts: Record<string, any> = {};
+  if (e.toggles.autoContrast) opts.auto_contrast = true;
+  if (e.toggles.sharpen) opts.sharpen = true;
+  if (e.toggles.denoise) opts.denoise = true;
+  if (e.toggles.normBg) opts.normalize_background = true;
+  if (e.sliders.brightness != null) opts.brightness = e.sliders.brightness;
+  if (e.sliders.contrast != null) opts.contrast = e.sliders.contrast;
+  return Object.keys(opts).length > 0 ? opts as NonNullable<Parameters<typeof ocrEnhanced>[1]> : undefined;
+}
+
+// ─── Animated processing overlay component ──────────────────────
+
+function ProcessingOverlay({ progress, filesCount, currentFile }: { progress: number; filesCount: number; currentFile: number }) {
+  const circumference = 2 * Math.PI * 54; // r=54
+  const strokeDashoffset = circumference - (progress / 100) * circumference;
+
+  const particles = useMemo(() =>
+    Array.from({ length: 12 }, (_, i) => ({
+      id: i,
+      left: `${10 + (i * 73) % 80}%`,
+      top: `${60 + (i * 37) % 30}%`,
+      duration: `${2.5 + (i % 4) * 0.5}s`,
+      delay: `${(i * 0.3) % 3}s`,
+    })), []);
+
+  return (
+    <div className="relative rounded-2xl overflow-hidden border border-violet-500/10 bg-gradient-to-br from-violet-500/[0.06] via-transparent to-purple-500/[0.04]">
+      {/* Floating particles */}
+      <div className="particles-container">
+        {particles.map(p => (
+          <div key={p.id} className="particle" style={{ '--left-pos': p.left, '--top-pos': p.top, '--drift-duration': p.duration, '--drift-delay': p.delay } as React.CSSProperties} />
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="relative flex flex-col items-center justify-center py-10 gap-5">
+        {/* SVG Processing Ring */}
+        <div className="processing-ring relative" style={{ width: 120, height: 120 }}>
+          {/* Background track */}
+          <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(139,92,246,0.1)" strokeWidth="4" />
+          </svg>
+          {/* Animated gradient stroke */}
+          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 120 120">
+            <defs>
+              <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#8b5cf6" />
+                <stop offset="50%" stopColor="#3b82f6" />
+                <stop offset="100%" stopColor="#10b981" />
+              </linearGradient>
+            </defs>
+            <circle
+              cx="60" cy="60" r="54" fill="none" stroke="url(#ringGrad)" strokeWidth="4"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={strokeDashoffset}
+              className="transition-[stroke-dashoffset] duration-300 ease-out"
+            />
+          </svg>
+          {/* Center content */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            {progress > 0 ? (
+              <>
+                <span className="text-xl font-bold text-white">{Math.round(progress)}%</span>
+                {filesCount > 1 && (
+                  <span className="text-[10px] text-slate-400 mt-0.5">image {currentFile + 1}/{filesCount}</span>
+                )}
+              </>
+            ) : (
+              <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
+            )}
+          </div>
+        </div>
+
+        {/* Status text */}
+        <div className="text-center space-y-1">
+          <p className="text-sm font-medium text-slate-200">
+            {filesCount > 1 ? `Processing image ${currentFile + 1} of ${filesCount}` : 'Processing image…'}
+          </p>
+          <p className="text-xs text-slate-500 animate-pulse">Analyzing text regions and extracting content</p>
+        </div>
+
+        {/* Progress bar (below ring) */}
+        {progress > 0 && (
+          <div className="w-full max-w-xs h-1.5 rounded-full bg-white/5 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-violet-500 via-blue-500 to-emerald-500 transition-all duration-300 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main OcrPage component ─────────────────────────────────────
 
 interface OcrPageProps {
   onResult?: (result: OcrResult) => void;
 }
 
 export function OcrPage({ onResult }: OcrPageProps) {
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [result, setResult] = useState<OcrResult | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [results, setResults] = useState<OcrResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
-  const [autoContrast, setAutoContrast] = useState(false);
-  const [sharpen, setSharpen] = useState(false);
-  const [denoise, setDenoise] = useState(false);
-  const [normBg, setNormBg] = useState(false);
+  const [slidersOpen, setSlidersOpen] = useState(false);
+  const [enhancements, setEnhancements] = useState<Enhancements>(defaultEnhancements);
   const [insightsOpen, setInsightsOpen] = useState(false);
+  const [activeResultTab, setActiveResultTab] = useState(0);
+  const [previewFilter, setPreviewFilter] = useState('none');
 
   const { addToast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
-  const isDark = true;
+  const activeEnhanceOptions = computeEnhanceOptions(enhancements);
+  const hasActiveToggles = toggleDefs.some(t => enhancements.toggles[t.key]);
+  const hasActiveSliders = sliderDefs.some(s => enhancements.sliders[s.key] != null);
 
-  /* ── Clipboard paste handling ───────────────────────────── */
+  /* ── Paste handling ─────────────────────────────── */
 
-  /** Convert a clipboard Blob into a File, if it's an image. */
   const blobToFile = (blob: Blob): File | null => {
     const type = blob.type;
-    if (!IMAGE_MIME.includes(type) && !type.startsWith('image/')) return null;
+    if (!type.startsWith('image/')) return null;
     const ext = type.split('/')[1] ?? 'png';
-    const name = (file?.name ?? 'pasted-image').replace(/\.[^.]+$/, '') + `.${ext}`;
-    return new File([blob], name, { type });
+    return new File([blob], `pasted-image-${Date.now()}.${ext}`, { type });
   };
 
-  /** Handle an image pasted from the clipboard. */
-  const handlePasteImage = useCallback((blob: Blob) => {
-    const file = blobToFile(blob);
-    if (!file) {
-      addToast('Clipboard does not contain an image.', 'error');
-      return;
+  const addFile = useCallback((f: File) => {
+    if (!IMAGE_MIME.includes(f.type) && !isImageFile(f)) {
+      addToast('Unsupported file type. Use JPG, PNG, WebP, BMP or GIF.', 'error');
+      return false;
     }
-    setFile(file);
-    setResult(null);
+    setFiles(prev => {
+      if (prev.find(p => p.name === f.name && p.size === f.size)) return prev; // dedup
+      return [...prev, f];
+    });
     const reader = new FileReader();
-    reader.onload = () => setPreview(reader.result as string);
-    reader.readAsDataURL(file);
-    addToast('Image pasted from clipboard.', 'success');
+    reader.onload = () => setPreviews(prev => [...prev, reader.result as string]);
+    reader.readAsDataURL(f);
+    return true;
   }, [addToast]);
 
-  /** Global paste listener — works anywhere on the page. */
   useEffect(() => {
     const handler = (e: ClipboardEvent) => {
       if (!e.clipboardData) return;
@@ -69,106 +221,145 @@ export function OcrPage({ onResult }: OcrPageProps) {
         if (item.type.startsWith('image/')) {
           e.preventDefault();
           const blob = item.getAsFile();
-          if (blob) handlePasteImage(blob);
+          if (blob && addFile(blob)) addToast('Image pasted from clipboard.', 'success');
           return;
         }
       }
     };
     document.addEventListener('paste', handler);
     return () => document.removeEventListener('paste', handler);
-  }, [handlePasteImage]);
+  }, [addFile, addToast]);
 
-  /** Paste event on the drop zone itself (captures before global). */
   const onZonePaste = useCallback((e: React.ClipboardEvent) => {
     if (!e.clipboardData) return;
     for (const item of e.clipboardData.items) {
       if (item.type.startsWith('image/')) {
         e.preventDefault();
         const blob = item.getAsFile();
-        if (blob) handlePasteImage(blob);
+        if (blob && addFile(blob)) addToast('Image pasted.', 'success');
         return;
       }
     }
-  }, [handlePasteImage]);
+  }, [addFile, addToast]);
 
-  /* ── File handling ──────────────────────────────────────── */
+  /* ── File handling ──────────────────────────────── */
 
-  const handleFile = useCallback((f: File) => {
-    if (!IMAGE_MIME.includes(f.type) && !isImageFile(f)) {
-      addToast('Unsupported file type. Use JPG, PNG, WebP, BMP or GIF.', 'error');
-      return;
-    }
-    setFile(f);
-    setResult(null);
-    const reader = new FileReader();
-    reader.onload = () => setPreview(reader.result as string);
-    reader.readAsDataURL(f);
-  }, [addToast]);
+  const handleFiles = useCallback((fileList: FileList | null) => {
+    if (!fileList) return;
+    Array.from(fileList).forEach(f => addFile(f));
+  }, [addFile]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
-  }, [handleFile]);
+    handleFiles(e.dataTransfer.files);
+  }, [handleFiles]);
 
-  /* ── OCR processing ─────────────────────────────────────── */
+  /* ── Remove file from selection ─────────────────── */
+
+  const removeFile = useCallback((idx: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== idx));
+    setPreviews(prev => prev.filter((_, i) => i !== idx));
+  }, []);
+
+  /* ── OCR processing ─────────────────────────────── */
 
   const runOcr = useCallback(async () => {
-    if (!file) return;
+    if (files.length === 0) return;
     setLoading(true);
     setProgress(0);
-    setResult(null);
-    try {
-      let data: OcrResult;
-      const useEnhance = autoContrast || sharpen || denoise || normBg;
+    setCurrentFileIndex(0);
+    setActiveResultTab(0);
+    setResults([]);
+    setInsightsOpen(false);
 
-      if (useEnhance) {
-        const opts = { auto_contrast: autoContrast, sharpen, denoise, normalize_background: normBg };
-        data = await ocrEnhanced(file, opts, setProgress);
+    try {
+      let finalResults: OcrResult[] = [];
+
+      if (files.length > 1) {
+        // Multi-image processing
+        const useEnhance = hasActiveToggles || hasActiveSliders;
+
+        if (!useEnhance && files.length >= 2) {
+          // Use batch endpoint for efficiency
+          try {
+            const batchResponse: BatchOcrResponse = await ocrBatch(files, undefined, (pct) => setProgress(pct));
+            finalResults = batchResponse.results;
+            setResults(finalResults);
+            addToast(`OCR complete — ${batchResponse.completed} of ${batchResponse.total_files} images processed.`, 'success');
+          } catch (err: any) {
+            // Fallback: process individually
+            for (let i = 0; i < files.length; i++) {
+              setCurrentFileIndex(i);
+              const result = await ocrSingle(files[i], undefined, (pct) => setProgress(pct));
+              finalResults.push(result);
+              setResults([...finalResults]);
+            }
+          }
+        } else {
+          // Process each with enhancements individually
+          for (let i = 0; i < files.length; i++) {
+            setCurrentFileIndex(i);
+            const fileProgress = (i / files.length) * 100;
+            setProgress(fileProgress);
+
+            const result = await ocrEnhanced(files[i], activeEnhanceOptions, (pct) =>
+              setProgress(fileProgress + (pct / files.length))
+            );
+            finalResults.push(result);
+            setResults([...finalResults]);
+          }
+        }
       } else {
-        data = await ocrSingle(file, undefined, setProgress);
+        // Single image
+        const useEnhance = hasActiveToggles || hasActiveSliders;
+
+        if (useEnhance) {
+          const data = await ocrEnhanced(files[0], activeEnhanceOptions, setProgress);
+          finalResults = [data];
+        } else {
+          const data = await ocrSingle(files[0], undefined, setProgress);
+          finalResults = [data];
+        }
       }
 
-      setResult(data);
-      addToast(`OCR complete — ${data.detected_lines} lines detected.`, 'success');
-      onResult?.(data);
+      // Callback for parent
+      if (finalResults.length === 1 && finalResults[0]) {
+        onResult?.(finalResults[0]);
+      } else if (finalResults.length > 0) {
+        onResult?.(finalResults[0]); // callback with first result
+      }
+
+      const successCount = finalResults.filter(r => r.status === 'success').length;
+      addToast(`${successCount}/${files.length} image${files.length > 1 ? 's' : ''} processed successfully.`, 'success');
+
     } catch (err: any) {
       addToast(err?.message || 'OCR failed.', 'error');
+      // Set results with error via cast since errorMsg isn't on OcrResult
+      setResults(files.map(f => ({ task_id: '', filename: f.name, file_type: f.type, status: 'error' as const, detected_lines: 0, full_text: '', lines: [], confidence_stats: { mean: 0, min: 0, max: 0, median: 0 }, processing_time_ms: 0, message: err?.message })));
     } finally {
       setLoading(false);
+      setCurrentFileIndex(0);
     }
-  }, [file, autoContrast, sharpen, denoise, normBg, addToast]);
+  }, [files, hasActiveToggles, hasActiveSliders, activeEnhanceOptions, addToast, onResult]);
 
-  /* ── Clipboard / Export helpers ─────────────────────────── */
+  /* ── Export helpers ─────────────────────────────── */
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     addToast('Text copied to clipboard.', 'info');
   };
 
-  const downloadTxt = () => {
-    if (!result) return;
+  const downloadTxt = (result: OcrResult) => {
     const blob = new Blob([result.full_text], { type: 'text/plain;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${file?.name ?? 'ocr'}.txt`;
+    a.download = `${result.filename ?? 'ocr'}.txt`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
 
-  /* ── Render helpers ─────────────────────────────────────── */
-
-  const confidenceColor = (c: number) => {
-    if (c >= 0.7) return 'text-emerald-400';
-    if (c >= 0.4) return 'text-amber-400';
-    return 'text-red-400';
-  };
-
-  const confidenceBg = (c: number) => {
-    if (c >= 0.7) return 'bg-emerald-500/20 text-emerald-400';
-    if (c >= 0.4) return 'bg-amber-500/20 text-amber-400';
-    return 'bg-red-500/20 text-red-400';
-  };
+  const confidenceColor = (c: number) => c >= 0.7 ? 'text-emerald-400' : c >= 0.4 ? 'text-amber-400' : 'text-red-400';
+  const confidenceBg = (c: number) => c >= 0.7 ? 'bg-emerald-500/20 text-emerald-400' : c >= 0.4 ? 'bg-amber-500/20 text-amber-400' : 'bg-red-500/20 text-red-400';
 
   const statsBars = (stats: ConfidenceStats) => [
     { label: 'Mean', value: stats.mean, color: 'from-violet-500 to-purple-500' },
@@ -177,41 +368,68 @@ export function OcrPage({ onResult }: OcrPageProps) {
     { label: 'Max', value: stats.max, color: 'from-emerald-400 to-green-500' },
   ];
 
-  return (
-    <div className="max-w-6xl mx-auto space-y-6">
+  /* ── Enhancement helpers ────────────────────────── */
 
-      {/* ── Hero Section ─────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-2xl border border-violet-500/10 bg-gradient-to-br from-violet-500/5 via-transparent to-purple-500/5">
+  const toggleEnhance = (key: string) => setEnhancements(prev => ({
+    ...prev, toggles: { ...prev.toggles, [key]: !prev.toggles[key] }
+  }));
+
+  const setSliderValue = (key: string, value: number | null) => setEnhancements(prev => ({
+    ...prev, sliders: { ...prev.sliders, [key]: value }
+  }));
+
+  const resetEnhancements = () => setEnhancements(defaultEnhancements);
+
+  const activeCount = toggleDefs.filter(t => enhancements.toggles[t.key]).length +
+    sliderDefs.filter(s => enhancements.sliders[s.key] != null).length;
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6 pb-8">
+
+      {/* ── Hero Section ─────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl border border-violet-500/10 bg-gradient-to-br from-violet-500/[0.07] via-transparent to-purple-500/[0.04]">
         <div className="absolute inset-0 bg-grid opacity-30" />
         <div className="relative px-6 py-8 sm:px-10 sm:py-12 text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-violet-500/20 bg-violet-500/10 text-violet-400 text-xs font-medium mb-4">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-violet-500/20 bg-violet-500/10 text-violet-400 text-xs font-medium mb-4 animate-fade-in">
             <Sparkles className="h-3 w-3" /> AI-Powered Urdu OCR
           </div>
-          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-2">
+          <h2 className="text-2xl sm:text-4xl font-bold tracking-tight mb-2">
             Extract Urdu Text from <span className="gradient-text">Images</span>
           </h2>
-          <p className={`text-sm max-w-md mx-auto ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
-            Upload any image with Urdu text and get instant, accurate text extraction powered by advanced OCR models.
+          <p className="text-sm max-w-md mx-auto text-slate-400">
+            Upload one or more images with Urdu text and get instant, accurate text extraction powered by advanced OCR models.
           </p>
-          <p className={`text-xs mt-2 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>Tip: You can also <span className="inline-flex items-center gap-1"><ClipboardPaste className="h-3 w-3"/> paste an image directly (Ctrl+V)</span></p>
+          <p className="text-xs mt-2 text-slate-500">
+            Tip: You can also <span className="inline-flex items-center gap-1"><ClipboardPaste className="h-3 w-3"/> paste an image directly (Ctrl+V)</span>
+          </p>
         </div>
       </div>
 
-      {/* ── Upload Zone ─────────────────────────────── */}
-      <div className="glass-card rounded-2xl p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <ImageIcon className={`h-5 w-5 ${isDark ? 'text-slate-300' : 'text-gray-600'}`} />
-          <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Upload Image</h3>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-700/50 text-slate-400' : 'bg-gray-100 text-gray-500'}`}>JPG, PNG, WebP, BMP, GIF</span>
+      {/* ── Upload Zone ──────────────────────────── */}
+      <div className="glass-card rounded-2xl p-6 animate-fade-in">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <ImageIcon className="h-5 w-5 text-slate-300" />
+            <h3 className="font-semibold text-white">Upload Images</h3>
+            {files.length > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 font-medium">
+                {files.length} file{files.length > 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+          {files.length > 0 && (
+            <button onClick={() => { setFiles([]); setPreviews([]); }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-red-400 transition-colors cursor-pointer">
+              <Trash2 className="h-3.5 w-3.5" /> Clear All
+            </button>
+          )}
         </div>
 
+        {/* Drop zone */}
         <div
-          className={`relative border-2 border-dashed rounded-xl p-8 sm:p-12 text-center transition-all duration-300 cursor-pointer ${
-            preview
-              ? 'border-violet-500/40 bg-violet-500/5'
-              : isDark
-                ? 'border-slate-700/60 hover:border-violet-500/30 hover:bg-white/[0.02]'
-                : 'border-gray-200 hover:border-violet-400/40 hover:bg-violet-50/30'
+          className={`relative border-2 border-dashed rounded-xl p-6 sm:p-10 text-center transition-all duration-300 cursor-pointer ${
+            files.length > 0
+              ? 'border-violet-500/40 bg-violet-500/[0.03]'
+              : 'border-slate-700/60 hover:border-violet-500/30 hover:bg-white/[0.02]'
           }`}
           onDragOver={(e) => e.preventDefault()}
           onDrop={onDrop}
@@ -222,259 +440,364 @@ export function OcrPage({ onResult }: OcrPageProps) {
             ref={inputRef}
             type="file"
             accept=".jpg,.jpeg,.png,.webp,.bmp,.gif"
+            multiple
             className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+            onChange={(e) => handleFiles(e.target.files)}
           />
 
-          {preview ? (
+          {files.length > 0 ? (
             <div className="space-y-4">
-              <div className="relative inline-block max-h-72 rounded-xl overflow-hidden border border-slate-700/50">
-                <img src={preview} alt="Preview" className="max-h-72 mx-auto object-contain" />
+              {/* Thumbnail grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-80 overflow-y-auto p-2">
+                {previews.map((preview, idx) => (
+                  <div key={idx} className="thumb-card relative group rounded-xl overflow-hidden border border-slate-700/50 bg-white/[0.02]">
+                    <img src={preview} alt={`Preview ${idx + 1}`} className="w-full h-32 object-cover" style={{ filter: previewFilter }} />
+                    {/* Remove button */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
+                      className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500/80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    {/* File info overlay */}
+                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                      <p className="text-[10px] text-white truncate">{files[idx]?.name}</p>
+                      <p className="text-[9px] text-slate-300">{formatBytes(files[idx]?.size ?? 0)}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className={`inline-flex items-center gap-2 text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                {file?.name} · {formatBytes(file?.size ?? 0)}
+
+              {/* Active files summary */}
+              <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
+                <span className="text-slate-400">
+                  Total: {formatBytes(files.reduce((sum, f) => sum + (f?.size ?? 0), 0))}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                  <span className="text-emerald-400 font-medium">{files.length} image{files.length > 1 ? 's' : ''} ready</span>
+                </div>
               </div>
             </div>
           ) : (
             <div className="space-y-3">
-              <div className={`w-16 h-16 rounded-2xl mx-auto flex items-center justify-center ${isDark ? 'bg-white/5' : 'bg-gray-100'}`}>
-                <Upload className={`h-8 w-8 ${isDark ? 'text-slate-500' : 'text-gray-400'}`} />
+              <div className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center bg-white/5">
+                <Upload className="h-8 w-8 text-slate-500" />
               </div>
               <div>
-                <p className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>Drag & drop or click to select</p>
-                <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>Maximum file size: 20MB</p>
+                <p className="text-sm font-medium text-slate-300">Drag & drop images or click to select</p>
+                <p className="text-xs mt-1 text-slate-500">Supports JPG, PNG, WebP, BMP, GIF · Max 20MB each · Multiple files allowed</p>
               </div>
             </div>
           )}
         </div>
 
-        {/* Enhancement options */}
+        {/* ── Enhancement Options ─────────────────── */}
         <div className="mt-4">
           <button
             onClick={() => setEnhanceOpen(!enhanceOpen)}
-            className={`flex items-center gap-2 text-sm font-medium cursor-pointer transition-colors ${isDark ? 'text-slate-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'}`}
+            className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white transition-colors cursor-pointer"
           >
-            <Settings2 className="h-4 w-4" /> Enhancement Options
-            <span className={`text-xs px-1.5 py-0.5 rounded ${isDark ? 'bg-slate-700/50 text-slate-400' : 'bg-gray-100 text-gray-500'}`}>
-              {autoContrast || sharpen || denoise || normBg ? 'Active' : 'Off'}
-            </span>
+            <SlidersHorizontal className="h-4 w-4" />
+            Enhancement Options
+            {activeCount > 0 && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-400 font-medium">{activeCount} active</span>
+            )}
+            {enhanceOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </button>
 
           {enhanceOpen && (
-            <div className={`mt-3 p-4 rounded-xl ${isDark ? 'bg-white/[0.02]' : 'bg-gray-50'}`}>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  ['Auto Contrast', autoContrast] as const,
-                  ['Sharpen', sharpen] as const,
-                  ['Denoise', denoise] as const,
-                  ['Normalize BG', normBg] as const,
-                ].map(([label, val]) => {
-                  const setters: Record<string, () => void> = {
-                    'Auto Contrast': () => setAutoContrast(!autoContrast),
-                    Sharpen: () => setSharpen(!sharpen),
-                    Denoise: () => setDenoise(!denoise),
-                    'Normalize BG': () => setNormBg(!normBg),
-                  };
-                  return (
-                    <label key={label} className="flex items-center gap-2 text-sm cursor-pointer group">
-                      <div className={`relative w-9 h-5 rounded-full transition-colors ${val ? 'bg-violet-500' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`}>
-                        <input type="checkbox" checked={val} onChange={setters[label]} className="sr-only peer" />
-                        <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${val ? 'translate-x-4' : ''}`} />
-                      </div>
-                      <span className={`${isDark ? 'text-slate-300 group-hover:text-white' : 'text-gray-600 group-hover:text-gray-900'} transition-colors`}>{label}</span>
-                    </label>
-                  );
-                })}
+            <div className="mt-3 space-y-4 animate-fade-in">
+              {/* Toggle row */}
+              <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-700/30">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Quick Toggles</span>
+                  {(hasActiveToggles || hasActiveSliders) && (
+                    <button onClick={resetEnhancements} className="text-xs text-violet-400 hover:text-violet-300 transition-colors cursor-pointer">Reset All</button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {toggleDefs.map(({ key, label, icon: Icon }) => (
+                    <button
+                      key={key}
+                      onClick={() => toggleEnhance(key)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        enhancements.toggles[key]
+                          ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
+                          : 'bg-white/[0.03] text-slate-400 border border-slate-700/30 hover:bg-white/[0.06] hover:text-slate-300'
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {/* Sliders (expandable) */}
+              {slidersOpen && (
+                <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-700/30 animate-fade-in">
+                  <span className="text-xs text-slate-500 uppercase tracking-wider font-medium block mb-3">Fine Tuning</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {sliderDefs.map(({ key, label, min, max, step }) => {
+                      const val = enhancements.sliders[key];
+                      return (
+                        <div key={key} className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs text-slate-400">{label}</label>
+                            <span className={`text-xs font-mono ${val != null ? 'text-violet-400' : 'text-slate-600'}`}>
+                              {val != null ? (val > 0 ? `+${val}` : val) : 'Off'}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={min} max={max} step={step}
+                            value={val ?? (min + max) / 2}
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              setSliderValue(key, v >= min && v <= max ? v : null);
+                              if (v >= min && v <= max) setPreviewFilter(computeCssFilters({ ...enhancements, sliders: { ...enhancements.sliders, [key]: v } }));
+                            }}
+                            className="enhancement-slider"
+                          />
+                          <div className="flex justify-between text-[9px] text-slate-600">
+                            <span>{min}</span><span>{max}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Preview filter toggle */}
+              {previews.length > 0 && (hasActiveToggles || hasActiveSliders) && (
+                <div className="flex items-center gap-2 text-xs">
+                  <Eye className="h-3.5 w-3.5 text-slate-500" />
+                  <span className="text-slate-400">Live preview:</span>
+                  {previewFilter !== 'none' ? (
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">On</span>
+                  ) : (
+                    <button onClick={() => setPreviewFilter(computeCssFilters(enhancements))} className="px-2 py-0.5 rounded bg-slate-700 text-slate-400 cursor-pointer hover:bg-slate-600 hover:text-white transition-colors">Apply</button>
+                  )}
+                  {previewFilter !== 'none' && (
+                    <button onClick={() => setPreviewFilter('none')} className="text-violet-400 hover:text-violet-300 cursor-pointer">Reset</button>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* Action buttons */}
-        <div className="mt-5 flex items-center gap-3">
+        {/* ── Action buttons ─────────────────────── */}
+        <div className="mt-5 flex items-center gap-3 flex-wrap">
           <button
             onClick={runOcr}
-            disabled={!file || loading}
+            disabled={files.length === 0 || loading}
             className={`relative inline-flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-semibold transition-all duration-300 ${
-              file && !loading
-                ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:scale-[1.02]'
-                : isDark ? 'bg-slate-800 text-slate-500' : 'bg-gray-200 text-gray-400'
+              files.length > 0 && !loading
+                ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:scale-[1.02] active:scale-[0.98]'
+                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
             } disabled:cursor-not-allowed`}
           >
             {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Processing…
-              </>
+              <><Loader2 className="h-4 w-4 animate-spin" /> Processing…</>
             ) : (
-              <>
-                <Sparkles className="h-4 w-4" />
-                Extract Text
-              </>
+              <><Sparkles className="h-4 w-4" /> Extract Text{files.length > 1 ? ` (${files.length})` : ''}</>
             )}
           </button>
 
           {progress > 0 && progress < 100 && (
             <div className="flex-1 max-w-[200px]">
-              <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-gray-200'}`}>
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
+              <div className="h-2 rounded-full overflow-hidden bg-slate-800/50">
+                <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-300" style={{ width: `${progress}%` }} />
               </div>
             </div>
+          )}
+
+          {/* Toggle sliders button */}
+          {enhanceOpen && (
+            <button
+              onClick={() => setSlidersOpen(!slidersOpen)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                slidersOpen ? 'bg-violet-500/15 text-violet-400 border border-violet-500/20' : 'bg-white/[0.03] text-slate-400 hover:text-slate-300 border border-slate-700/30'
+              }`}
+            >
+              <Minus className="h-3 w-3" /> Fine Tuning
+            </button>
           )}
         </div>
       </div>
 
-      {/* ── Results Section ─────────────────────────── */}
-      {result && (
-        <>
-          {/* Status bar */}
-          <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-xl ${isDark ? 'bg-white/[0.03]' : 'bg-gray-100'}`}>
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${
-              result.status === 'success' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
-            }`}>
-              {result.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
-              {result.status.toUpperCase()}
-            </span>
-            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{result.task_id}</span>
-            <span className={`w-1 h-1 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-300'}`} />
-            <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>{result.detected_lines} lines</span>
-            <span className={`w-1 h-1 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-300'}`} />
-            <span className={`text-xs font-medium ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>{Math.round(result.processing_time_ms)}ms</span>
+      {/* ── Loading / Processing State ─────────── */}
+      {loading && (
+        <ProcessingOverlay progress={progress} filesCount={files.length} currentFile={currentFileIndex} />
+      )}
 
-            {/* AI Insights toggle */}
-            {(result as any).ai_analysis && (
-              <>
-                <span className={`w-1 h-1 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-300'}`} />
+      {/* ── Results Section ──────────────────────── */}
+      {results.length > 0 && !loading && (
+        <div className="space-y-6 animate-fade-in">
+
+          {/* Multi-image tabs */}
+          {results.length > 1 && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-2 animate-card-float stagger-1">
+              {results.map((result, idx) => (
                 <button
-                  onClick={() => setInsightsOpen(!insightsOpen)}
-                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                    insightsOpen
-                      ? 'bg-violet-500/15 text-violet-400'
-                      : isDark ? 'text-slate-400 hover:text-white' : 'text-gray-500 hover:text-gray-900'
+                  key={idx}
+                  onClick={() => setActiveResultTab(idx)}
+                  className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    activeResultTab === idx
+                      ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
+                      : result.status === 'error'
+                        ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                        : 'bg-white/[0.03] text-slate-400 hover:bg-white/[0.06] hover:text-slate-300 border border-slate-700/30'
                   }`}
                 >
-                  <Brain className="h-3 w-3" />
-                  AI Insights
-                  <span className={`transform transition-transform ${insightsOpen ? 'rotate-180' : ''}`}>▼</span>
+                  {result.status === 'error' ? <AlertTriangle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3 text-emerald-400" />}
+                  {files[idx]?.name?.slice(0, 15)}{(files[idx]?.name?.length ?? 0) > 15 ? '…' : ''}
                 </button>
-              </>
-            )}
-          </div>
-
-          {/* AI Insights Panel */}
-          {insightsOpen && (result as any).ai_analysis && <AiInsightsPanel result={result} isDark={isDark} />}
-
-          {/* Annotated Image */}
-          {result.annotated_image_b64 && (
-            <div className="glass-card rounded-2xl p-6">
-              <h3 className={`font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>Detected Lines</h3>
-              <div className="rounded-xl overflow-hidden border border-slate-700/50">
-                <img src={`data:image/png;base64,${result.annotated_image_b64}`} alt="Annotated" className="max-h-[500px] mx-auto w-full object-contain" />
-              </div>
+              ))}
             </div>
           )}
 
-          {/* Full Text */}
-          <div className="glass-card rounded-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Extracted Urdu Text</h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => copyToClipboard(result.full_text)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                    isDark ? 'bg-white/5 hover:bg-white/10 text-slate-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
-                  }`}
-                >
-                  <Copy className="h-3.5 w-3.5" /> Copy
-                </button>
-                <button
-                  onClick={downloadTxt}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                    isDark ? 'bg-white/5 hover:bg-white/10 text-slate-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
-                  }`}
-                >
-                  Download .txt
-                </button>
+          {/* Status bar */}
+          <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-xl animate-card-float stagger-1 ${results[activeResultTab]?.status === 'error' ? 'bg-red-500/5 border border-red-500/10' : 'bg-white/[0.03]'}`}>
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${
+              results[activeResultTab]?.status === 'success' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+            }`}>
+              {results[activeResultTab]?.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+              {results[activeResultTab]?.status?.toUpperCase()}
+            </span>
+            <span className="text-xs text-slate-500">{results[activeResultTab]?.task_id}</span>
+            <span className="w-1 h-1 rounded-full bg-slate-700" />
+            <span className="text-xs text-slate-400">{results[activeResultTab]?.detected_lines} lines</span>
+            <span className="w-1 h-1 rounded-full bg-slate-700" />
+            <span className="text-xs font-medium text-slate-300">{Math.round(results[activeResultTab]?.processing_time_ms ?? 0)}ms</span>
+          </div>
+
+          {/* AI Insights */}
+          {results[activeResultTab] && (results[activeResultTab] as any).ai_analysis && (
+            <button
+              onClick={() => setInsightsOpen(!insightsOpen)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer animate-card-float stagger-2 ${
+                insightsOpen ? 'bg-violet-500/15 text-violet-400 border border-violet-500/20' : 'bg-white/[0.03] text-slate-400 hover:text-slate-300 border border-slate-700/30'
+              }`}
+            >
+              <Brain className="h-3.5 w-3.5" />
+              AI Insights
+              {insightsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </button>
+          )}
+
+          {insightsOpen && results[activeResultTab] && (results[activeResultTab] as any).ai_analysis && (
+            <AiInsightsPanel result={results[activeResultTab]} />
+          )}
+
+          {/* Results cards */}
+          {results[activeResultTab]?.status === 'success' ? <>
+            {/* Annotated Image */}
+            {(results[activeResultTab] as any).annotated_image_b64 && (
+              <div className="glass-card rounded-2xl p-6 animate-card-float stagger-2">
+                <h3 className="font-semibold mb-4 text-white">Detected Lines</h3>
+                <div className="rounded-xl overflow-hidden border border-slate-700/50">
+                  <img src={`data:image/png;base64,${(results[activeResultTab] as any).annotated_image_b64}`} alt="Annotated" className="max-h-[500px] mx-auto w-full object-contain" />
+                </div>
+              </div>
+            )}
+
+            {/* Full Text */}
+            <div className="glass-card rounded-2xl p-6 animate-card-float stagger-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-white">Extracted Urdu Text</h3>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => copyToClipboard(results[activeResultTab]?.full_text ?? '')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 hover:bg-white/10 text-slate-300 transition-all cursor-pointer">
+                    <Copy className="h-3.5 w-3.5" /> Copy
+                  </button>
+                  <button onClick={() => downloadTxt(results[activeResultTab!])} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 hover:bg-white/10 text-slate-300 transition-all cursor-pointer">
+                    <FileText className="h-3.5 w-3.5" /> .txt
+                  </button>
+                </div>
+              </div>
+              <div className="rounded-xl px-5 py-4 border leading-loose text-base bg-white/[0.02] border-slate-700/60">
+                <p className="rtl text-right text-slate-200">
+                  {results[activeResultTab]?.full_text || <span className="text-slate-600 italic">No text detected.</span>}
+                </p>
               </div>
             </div>
-            <div className={`rounded-xl px-5 py-4 border leading-loose text-base ${
-              isDark ? 'bg-white/[0.02] border-slate-700/60' : 'bg-gray-50 border-gray-200'
-            }`}>
-              <p className={`rtl text-right ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>
-                {result.full_text || <span className={`${isDark ? 'text-slate-600' : 'text-gray-400'} italic`}>No text detected.</span>}
-              </p>
-            </div>
-          </div>
 
-          {/* Per-line table */}
-          <div className="glass-card rounded-2xl p-6">
-            <h3 className={`font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>Per-Line Results <span className={`font-normal text-sm ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>({result.lines.length})</span></h3>
-            <div className="overflow-x-auto rounded-xl border border-slate-700/40">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className={isDark ? 'bg-white/[0.03]' : 'bg-gray-50'}>
-                    <th className={`py-3 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>#</th>
-                    <th className={`py-3 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Text (Urdu)</th>
-                    <th className={`py-3 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Confidence</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.lines.map((line, i) => (
-                    <tr key={i} className={`border-t transition-colors ${isDark ? 'border-slate-800/50 hover:bg-white/[0.02]' : 'border-gray-100 hover:bg-gray-50'}`}>
-                      <td className={`py-3 px-4 font-mono text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{i + 1}</td>
-                      <td className="py-3 px-4 rtl text-right" dir="rtl"><span className={`${isDark ? 'text-slate-200' : 'text-gray-800'}`}>{line.text}</span></td>
-                      <td className="py-3 px-4">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${confidenceBg(line.confidence)}`}>
-                          {Math.round(line.confidence * 100)}%
-                        </span>
-                      </td>
+            {/* Per-line table */}
+            <div className="glass-card rounded-2xl p-6 animate-card-float stagger-4">
+              <h3 className="font-semibold mb-4 text-white">Per-Line Results <span className="font-normal text-sm text-slate-500">({(results[activeResultTab] as any)?.lines?.length ?? 0})</span></h3>
+              <div className="overflow-x-auto rounded-xl border border-slate-700/40 max-h-[500px] overflow-y-auto">
+                <table className="w-full text-sm sticky-header">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-white/[0.03]">
+                      <th className="py-3 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">#</th>
+                      <th className="py-3 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">Text (Urdu)</th>
+                      <th className="py-3 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">Confidence</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {(results[activeResultTab] as any)?.lines?.map((line: OcrLine, i: number) => (
+                      <tr key={i} className="border-t border-slate-800/50 hover:bg-white/[0.02] transition-colors">
+                        <td className="py-3 px-4 font-mono text-xs text-slate-500">{i + 1}</td>
+                        <td className="py-3 px-4 rtl text-right" dir="rtl"><span className="text-slate-200">{line.text}</span></td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${confidenceBg(line.confidence)}`}>
+                            {Math.round(line.confidence * 100)}%
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
 
-          {/* Confidence Stats */}
-          <div className="glass-card rounded-2xl p-6">
-            <h3 className={`font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>Confidence Statistics</h3>
-            <div className="space-y-3">
-              {statsBars(result.confidence_stats).map(({ label, value, color }) => (
-                <div key={label}>
-                  <div className="flex justify-between text-xs mb-1.5">
-                    <span className={`font-medium ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>{label}</span>
-                    <span className={`font-semibold ${confidenceColor(value)}`}>{Math.round(value * 100)}%</span>
+            {/* Confidence Stats */}
+            <div className="glass-card rounded-2xl p-6 animate-card-float stagger-5">
+              <h3 className="font-semibold mb-4 text-white">Confidence Statistics</h3>
+              <div className="space-y-3">
+                {statsBars(results[activeResultTab]?.confidence_stats ?? { mean: 0, min: 0, max: 0, median: 0 }).map(({ label, value, color }) => (
+                  <div key={label}>
+                    <div className="flex justify-between text-xs mb-1.5">
+                      <span className="font-medium text-slate-300">{label}</span>
+                      <span className={`font-semibold ${confidenceColor(value)}`}>{Math.round(value * 100)}%</span>
+                    </div>
+                    <div className="h-2.5 rounded-full overflow-hidden bg-slate-800/80">
+                      <div className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-700`} style={{ width: `${Math.round(value * 100)}%` }} />
+                    </div>
                   </div>
-                  <div className={`h-2.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-800/80' : 'bg-gray-100'}`}>
-                    <div
-                      className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-700`}
-                      style={{ width: `${Math.round(value * 100)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        </>
-      )}
-
-      {/* Loading state */}
-      {loading && !progress && (
-        <div className={`flex items-center gap-3 p-4 rounded-xl ${isDark ? 'bg-violet-500/5 border border-violet-500/10' : 'bg-violet-50 border border-violet-200'}`}>
-          <Loader2 className="h-5 w-5 animate-spin text-violet-400" />
-          <span className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>Processing image… This may take a moment.</span>
+          </> : (
+            /* Error state */
+            <div className="glass-card rounded-2xl p-8 text-center animate-card-float">
+              <AlertTriangle className="h-10 w-10 mx-auto mb-3 text-red-400" />
+              <h3 className="font-semibold text-red-400 mb-1">Processing Failed</h3>
+              <p className="text-sm text-slate-400">{(results[activeResultTab] as any)?.message || 'An unexpected error occurred.'}</p>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Empty state */}
-      {!result && !loading && file && (
-        <div className={`text-center py-12 rounded-2xl border border-dashed ${isDark ? 'border-slate-800 bg-white/[0.01]' : 'border-gray-200 bg-gray-50/50'}`}>
-          <Sparkles className={`h-8 w-8 mx-auto mb-3 ${isDark ? 'text-slate-600' : 'text-gray-400'}`} />
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Click "Extract Text" to process your image.</p>
+      {/* ── Empty state ──────────────────────────── */}
+      {!results.length && !loading && files.length > 0 && (
+        <div className="text-center py-12 rounded-2xl border border-dashed border-slate-800 bg-white/[0.01] animate-fade-in">
+          <Sparkles className="h-8 w-8 mx-auto mb-3 text-slate-600" />
+          <p className="text-sm text-slate-400">Click "Extract Text" to process your image{files.length > 1 ? 's' : ''}.</p>
+        </div>
+      )}
+
+      {/* ── Initial empty state ──────────────────── */}
+      {!results.length && !loading && files.length === 0 && (
+        <div className="text-center py-16 rounded-2xl border border-dashed border-slate-800 bg-white/[0.01]">
+          <div className="w-20 h-20 rounded-2xl mx-auto flex items-center justify-center bg-white/5 mb-4">
+            <ImageIcon className="h-10 w-10 text-slate-600" />
+          </div>
+          <p className="text-sm text-slate-500 mb-1">No images uploaded yet</p>
+          <p className="text-xs text-slate-600">Upload or paste an image to get started</p>
         </div>
       )}
     </div>
@@ -483,7 +806,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
 
 /* ── AI Insights Sub-component ─────────────────────────────── */
 
-function AiInsightsPanel({ result, isDark }: { result: OcrResult; isDark: boolean }) {
+function AiInsightsPanel({ result }: { result: OcrResult }) {
   const ai = (result as any).ai_analysis as DocumentAnalysis | undefined;
   const summary = (result as any).summary as SummaryResult | undefined;
   const tableDet = (result as any).table_detection as TableDetection | undefined;
@@ -505,14 +828,12 @@ function AiInsightsPanel({ result, isDark }: { result: OcrResult; isDark: boolea
   };
 
   return (
-    <div className="glass-card rounded-2xl p-6 space-y-5">
-      {/* Header */}
+    <div className="glass-card rounded-2xl p-6 space-y-5 animate-card-float">
       <div className="flex items-center gap-2 mb-1">
         <Brain className="h-5 w-5 text-violet-400" />
         <h3 className="text-lg font-semibold text-white">AI Document Insights</h3>
       </div>
 
-      {/* Language Detection */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <InsightCard title="Detected Language" iconColor="text-violet-400" bgColor="bg-violet-500/10">
           <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-500/10 text-violet-400 font-semibold text-sm">
@@ -537,29 +858,15 @@ function AiInsightsPanel({ result, isDark }: { result: OcrResult; isDark: boolea
               <>
                 <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 font-semibold text-sm">
                   <Icon className="h-4 w-4" />
-                  {ai.document_type.primary.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                  {ai.document_type.primary.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
                   <span className="text-xs opacity-70">({Math.round(ai.document_type.confidence * 100)}%)</span>
                 </span>
-                {Object.entries(ai.document_type.scores).filter(([, v]) => v > 0.05).length > 1 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {Object.entries(ai.document_type.scores)
-                      .filter(([, v]) => v > 0.05)
-                      .sort(([, a], [, b]) => b - a)
-                      .slice(1, 4)
-                      .map(([key, val]) => (
-                        <span key={key} className="text-xs px-2 py-0.5 rounded bg-slate-700/50 text-slate-400">
-                          {key.replace(/_/g, ' ')} ({Math.round(val * 100)}%)
-                        </span>
-                      ))}
-                  </div>
-                )}
               </>
             );
           })()}
         </InsightCard>
       </div>
 
-      {/* Content Stats */}
       {ai.content && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatPill label="Words" value={ai.content.word_count.toLocaleString()} />
@@ -569,15 +876,14 @@ function AiInsightsPanel({ result, isDark }: { result: OcrResult; isDark: boolea
         </div>
       )}
 
-      {/* Summary */}
       {summary && summary.summary && (
         <InsightCard title="AI Summary" iconColor="text-blue-400" bgColor="bg-blue-500/10">
           {summary.title && <p className="font-semibold text-sm text-white mb-1">{summary.title}</p>}
-          <p className={`text-sm leading-relaxed ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>{summary.summary}</p>
+          <p className="text-sm leading-relaxed text-slate-300">{summary.summary}</p>
           {summary.keywords.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-3">
-              {summary.keywords.slice(0, 6).map((kw, i) => (
-                <span key={i} className={`text-xs px-2 py-0.5 rounded font-medium ${isDark ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
+              {summary.keywords.slice(0, 6).map((kw: any, i: number) => (
+                <span key={i} className="text-xs px-2 py-0.5 rounded font-medium bg-blue-500/10 text-blue-400">
                   {kw.word}
                 </span>
               ))}
@@ -586,31 +892,14 @@ function AiInsightsPanel({ result, isDark }: { result: OcrResult; isDark: boolea
         </InsightCard>
       )}
 
-      {/* Table Detection */}
       {tableDet && tableDet.is_table && (
-        <div className={`rounded-xl p-4 border ${isDark ? 'bg-amber-500/5 border-amber-500/20' : 'bg-amber-50 border-amber-200'}`}>
+        <div className="rounded-xl p-4 border bg-amber-500/5 border-amber-500/20">
           <div className="flex items-center gap-2 mb-2">
             <FileImage className="h-4 w-4 text-amber-400" />
             <span className="text-sm font-semibold text-amber-400">Table Detected</span>
           </div>
-          <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
-            Structure found: {tableDet.tables[0]?.rows} rows × {tableDet.tables[0]?.cols} columns
-          </p>
+          <p className="text-xs text-slate-400">Structure: {tableDet.tables[0]?.rows} rows × {tableDet.tables[0]?.cols} columns</p>
         </div>
-      )}
-
-      {/* Recommendations */}
-      {(result as any).recommendations && (result as any).recommendations.recommendations?.length > 0 && (
-        <InsightCard title="Enhancement Recommendations" iconColor="text-amber-400" bgColor="bg-amber-500/10">
-          <div className="space-y-2">
-            {(result as any).recommendations.recommendations.map((rec: any, i: number) => (
-              <div key={i} className={`flex items-start gap-2 text-xs p-2 rounded-lg ${isDark ? 'bg-white/5' : 'bg-white'}`}>
-                <span className="text-amber-400 mt-0.5 shrink-0">●</span>
-                <span className={isDark ? 'text-slate-300' : 'text-gray-700'}>{rec.reason}</span>
-              </div>
-            ))}
-          </div>
-        </InsightCard>
       )}
     </div>
   );
@@ -629,25 +918,26 @@ function InsightCard({ title, iconColor, bgColor, children }: {
 
 function StatPill({ label, value }: { label: string; value: string }) {
   return (
-    <div className={`text-center p-3 rounded-xl bg-white/5`}>
-      <p className={`text-[10px] uppercase tracking-wider font-medium mb-1 text-slate-500`}>{label}</p>
-      <p className={`text-lg font-bold text-white tracking-tight`}>{value}</p>
+    <div className="text-center p-3 rounded-xl bg-white/5">
+      <p className="text-[10px] uppercase tracking-wider font-medium mb-1 text-slate-500">{label}</p>
+      <p className="text-lg font-bold text-white tracking-tight">{value}</p>
     </div>
   );
 }
 
-/* ── Type imports (inline for component) ─────────────────────── */
+/* ── Types ───────────────────────────────────── */
+
 interface DocumentAnalysis {
-  language: { primary: string; confidence: number; languages: Array<{ code: string; label: string; proportion: number }>;
-    proportions: Record<string, number>; is_mixed: boolean; script_count: number; };
+  language: { primary: string; confidence: number; languages: Array<{ code: string; label: string; proportion: number }>; };
   document_type: { primary: string; confidence: number; scores: Record<string, number>; };
   content?: { word_count: number; sentence_count: number; avg_word_length: number; uniqueness_ratio: number; };
-  recommendations?: string[];
 }
+
 interface SummaryResult {
   summary: string; title: string; keywords: Array<{ word: string }>;
   confidence: number; method: string;
 }
+
 interface TableDetection {
   is_table: boolean;
   tables: Array<{ rows: number; cols: number; cells: string[][] }>;

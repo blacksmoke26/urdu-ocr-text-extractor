@@ -376,9 +376,10 @@ export const SelectAdvanced: React.FC<SelectAdvancedProps> = (props) => {
     if (!value) return placeholder;
     if (formatValue) {
       const selectedOpt = getOptionByValue(options, value);
-      return formatValue(selectedOpt);
+      return formatValue(selectedOpt) || placeholder;
     }
-    return getLabelByValue(options, value) || value;
+    const label = getLabelByValue(options, value);
+    return label && label !== 'undefined' ? label : value;
   }, [value, options, formatValue, placeholder]);
 
   // --- Helper: Filter Options ---
@@ -467,79 +468,11 @@ export const SelectAdvanced: React.FC<SelectAdvancedProps> = (props) => {
   }, [isOpen, navOptions, focusedIndex, onChange, onCreateOption]);
 
   // ==========================================
-  // 1. Standard Non-Searchable Select
+  // Use popover combobox (works with any triggerWidth, clearable, or non-searchable)
+  // This avoids Radix Select.Trigger's layout issues when passing custom children.
   // ==========================================
 
-  if (!searchable) {
-    return (
-      <Select.Root
-        value={value}
-        disabled={disabled || loading}
-        onValueChange={onChange}
-        onOpenChange={(open) => setIsOpen(open)}>
-        <Select.Trigger
-          className={(/^[0-9]/.test(triggerWidth) ? `w-[${triggerWidth}]` : triggerWidth) + ' SelectTrigger'}
-          style={{width: triggerWidth}}>
-          {/* Left Side: Icon and Text */}
-          <Flex align="center" gap="2" as="span" className="overflow-hidden" style={{flex: 1}}>
-            {/* FIX: Added color="gray" for Light theme visibility */}
-            <Text className="truncate flex" size="2" color="gray">
-              {selectedOption?.(triggerContent as string, getOptionByValue(options, value)!) ?? triggerContent}
-            </Text>
-          </Flex>
-
-          {/* Right Side: Loading, Clear, Arrow Icon */}
-          {/* Using Flex to group controls naturally without absolute positioning conflicts */}
-          <Flex align="center" gap="2">
-            {loading && <LoadingDots />}
-
-            {clearable && value && !disabled && (
-              <X
-                height="14"
-                width="14"
-                color="gray"
-                className="hover:text-red-500"
-                onClick={handleClear}
-                style={{cursor: 'pointer', zIndex: 1230}}
-              />
-            )}
-
-            {/* Conditional Arrow Icon */}
-            {isOpen ? <ChevronUp /> : <ChevronDown />}
-          </Flex>
-        </Select.Trigger>
-
-        <Select.Content>
-          <Select.Group>
-            {options.map((opt, idx) => {
-              const isGroup = 'options' in opt;
-              if (isGroup) {
-                return (
-                  <div key={idx}>
-                    <Select.Label>{opt.label}</Select.Label>
-                    {opt.options?.map((groupOpt) => (
-                      <Select.Item key={groupOpt.value} value={groupOpt.value} disabled={groupOpt.disabled}>
-                        {formatLabel ? formatLabel(groupOpt) : groupOpt.label}
-                      </Select.Item>
-                    ))}
-                  </div>
-                );
-              }
-              return (
-                <Select.Item key={opt.value} value={opt?.value ?? ''} disabled={opt.disabled}>
-                  {formatLabel ? formatLabel(opt as SelectOption) : opt.label}
-                </Select.Item>
-              );
-            })}
-          </Select.Group>
-        </Select.Content>
-      </Select.Root>
-    );
-  }
-
-  // ==========================================
-  // 2. Searchable Combobox (Popover based)
-  // ==========================================
+  const selectedOpt = getOptionByValue(options, value);
 
   return (
     <Popover.Root open={isOpen} onOpenChange={setIsOpen}>
@@ -547,15 +480,13 @@ export const SelectAdvanced: React.FC<SelectAdvancedProps> = (props) => {
         <Flex
           align="center"
           justify="between"
-          className={`w-[${triggerWidth}] h-9 px-2 rounded-md border border-gray-6 bg-gray-1 hover:bg-gray-2 data-[state=open]:bg-gray-2 cursor-pointer text-sm transition-colors`}
+          className={`w-[${triggerWidth}] h-9 px-2 rounded-md border border-gray-6 bg-gray-1 hover:bg-gray-2 data-[state=open]:bg-gray-2 cursor-pointer text-sm transition-colors ${disabled || loading ? 'opacity-50 pointer-events-none' : ''}`}
           style={{width: triggerWidth}}
           tabIndex={0}
         >
           <Flex align="center" gap="2" className="overflow-hidden">
             {icon}
-            <Text className="truncate" size="2" color="gray">
-              {selectedOption?.(triggerContent as string, getOptionByValue(options, value)!) ?? triggerContent}
-            </Text>
+            <Text className="truncate" size="2" color="gray">{triggerContent}</Text>
           </Flex>
 
           <Flex align="center" gap="2">
@@ -582,27 +513,29 @@ export const SelectAdvanced: React.FC<SelectAdvancedProps> = (props) => {
         sideOffset={4}
         onKeyDown={handleKeyDown}
       >
-        <Box px="2" pt="2" pb="0">
-          <TextField.Root
-            placeholder="Search..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            ref={inputRef}
-          >
-            <TextField.Slot>
-              <ZoomOut height="14" width="14"/>
-            </TextField.Slot>
-          </TextField.Root>
-        </Box>
+        {searchable ? (
+          <Box px="2" pt="2" pb="0">
+            <TextField.Root
+              placeholder="Search..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              ref={inputRef}
+            >
+              <TextField.Slot>
+                <ZoomOut height="14" width="14"/>
+              </TextField.Slot>
+            </TextField.Root>
+          </Box>
+        ) : null}
 
-        <Separator size="4" my="2"/>
+        {searchable && <Separator size="4" my="2"/>}
 
         {/* Scrollable List Area */}
         <ScrollArea
           style={{maxHeight: '200px'}}
           type="auto"
           scrollbars="vertical">
-          <Box py="2">
+          <Box py={searchable ? "2" : "1"}>
             {filteredOptions.length === 0 && !hasCreatableOption && !loading ? (
               <Flex align="center" justify="center" py="4">
                 <Text size="1" color="gray">{noResultMessage}</Text>
