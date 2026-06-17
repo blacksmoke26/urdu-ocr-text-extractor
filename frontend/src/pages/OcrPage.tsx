@@ -27,7 +27,11 @@ import type { UploadProgress } from '#/types/api';
 
 const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/gif'];
 
-export function OcrPage() {
+interface OcrPageProps {
+  onResult?: (result: OcrResult) => void;
+}
+
+export function OcrPage({ onResult }: OcrPageProps) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [result, setResult] = useState<OcrResult | null>(null);
@@ -84,6 +88,7 @@ export function OcrPage() {
 
       setResult(data);
       addToast(`OCR complete — ${data.detected_lines} lines detected.`, 'success');
+      onResult?.(data);
     } catch (err: any) {
       addToast(err?.message || 'OCR failed.', 'error');
     } finally {

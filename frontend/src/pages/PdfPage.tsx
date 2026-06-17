@@ -20,11 +20,11 @@ import {Badge} from '#/components/ui/Badge';
 import {ProgressBar} from '#/components/ui/ProgressBar';
 import {Dialog, DialogBody, DialogContent} from '#/components/ui/Dialog';
 import {useToast} from '#/context/ToastContext';
-import type {PdfExtractResponse, PdfInfo, PdfOcrPageResult} from '#/types/api';
+import type {PdfExtractResponse, PdfInfo, PdfOcrPageResult, PdfOcrResponse} from '#/types/api';
 
 type PdfTab = 'info' | 'extract' | 'ocr';
 
-export function PdfPage() {
+export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse) => void }) {
   const [tab, setTab] = useState<PdfTab>('info');
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -256,6 +256,7 @@ export function PdfPage() {
         setProgressTotalPages(data.total_pages);
         setCurrentTaskId(data.task_id || null);
         addToast(`PDF OCR complete — ${data.total_text_lines} lines across ${data.total_pages} pages.`, 'success');
+        onPdfResult?.(data);
       }
     } catch (err: any) {
       // Axios may still throw for cancelled connections

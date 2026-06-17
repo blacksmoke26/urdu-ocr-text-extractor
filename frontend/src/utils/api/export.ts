@@ -10,7 +10,9 @@
  */
 
 import { postJson } from '../apiClient';
-import type { OcrResult, ExportResponse, BinaryExportResponse, ExportFormat } from '#/types/api';
+import type { OcrResult, PdfOcrResponse, ExportResponse, BinaryExportResponse, ExportFormat } from '#/types/api';
+
+/* ─── Image OCR Exports ───────────────────────────── */
 
 /** Send OCR result for JSON formatting. */
 export const exportJson = (result: OcrResult): Promise<ExportResponse> =>
@@ -31,6 +33,26 @@ export const exportDocx = (result: OcrResult): Promise<BinaryExportResponse> =>
 /** Generate a searchable PDF with invisible text overlay. */
 export const exportSearchablePdf = (result: OcrResult): Promise<BinaryExportResponse> =>
   postJson<BinaryExportResponse>('/export/searchable-pdf', result);
+
+/* ─── PDF OCR Exports ─────────────────────────────── */
+
+/** Send PDF OCR response for JSON export. */
+export const exportPdfJson = (result: PdfOcrResponse): Promise<ExportResponse> =>
+  postJson<ExportResponse>('/export/pdf-json', result);
+
+/** Send PDF OCR response for plain text export. */
+export const exportPdfTxt = (result: PdfOcrResponse): Promise<ExportResponse> =>
+  postJson<ExportResponse>('/export/pdf-txt', result);
+
+/** Send PDF OCR response for CSV export. */
+export const exportPdfCsv = (result: PdfOcrResponse): Promise<ExportResponse> =>
+  postJson<ExportResponse>('/export/pdf-csv', result);
+
+/** Send PDF OCR response for DOCX export. */
+export const exportPdfDocx = (result: PdfOcrResponse): Promise<BinaryExportResponse> =>
+  postJson<BinaryExportResponse>('/export/pdf-docx', result);
+
+/* ─── Download Helpers ────────────────────────────── */
 
 /** Download a base64-encoded binary file in the browser. */
 export function downloadBase64File(dataB64: string, filename: string, mimeType = 'application/octet-stream') {

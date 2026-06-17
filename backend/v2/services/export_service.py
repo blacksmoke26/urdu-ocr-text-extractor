@@ -168,3 +168,112 @@ class ExportService:
         with open(path, "wb") as f:
             f.write(export_data)
         return path
+
+    # ─── PDF-specific export methods ─────────────────────
+
+    @staticmethod
+    def export_pdf_json(result_dict: dict) -> str:
+        """Export PDF OCR result as formatted JSON string."""
+        pages = result_dict.get("pages", [])
+        all_lines: list[dict] = []
+        for page in pages:
+            for line in page.get("lines", []):
+                all_lines.append({**line, "page_number": page.get("page_number", 0)})
+
+        export_data = {
+            "filename": result_dict.get("filename", "document"),
+            "total_pages": result_dict.get("total_pages", len(pages)),
+            "total_text_lines": result_dict.get("total_text_lines", len(all_lines)),
+            "pages": pages,
+            "all_lines": all_lines,
+        }
+        return json.dumps(export_data, indent=2, ensure_ascii=False)
+
+    @staticmethod
+    def export_pdf_txt(result_dict: dict) -> str:
+        """Extract full text from PDF OCR result with page separators."""
+        pages = result_dict.get("pages", [])
+        sections: list[str] = []
+        for page in pages:
+            page_text = page.get("full_text", "")
+            page_num = page.get("page_number", 0)
+            if page_text:
+                sections.append(f"--- Page {page_num} ---\n{page_text}")
+            else:
+                # fallback: aggregate line texts
+                lines = page.get("lines", [])
+                if lines:
+                    text_lines = [line.get("text", "") for line in lines]
+                    sections.append(f"--- Page {page_num} ---\n{''.join(text_lines)}")
+                else:
+                    sections.append(f"--- Page {page_num} ---\n(No text detected)")
+        return "\n\n".join(sections)
+
+    @staticmethod
+    def export_pdf_csv(result_dict: dict) -> str:
+        """Export PDF OCR lines as CSV with page number, index, text, confidence, bbox."""
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["page", "index", "text", "confidence", "bounding_box"])
+        for page in result_dict.get("pages", []):
+            for idx, line in enumerate(page.get("lines", [])):
+                bbox = line.get("bounding_box", [])
+                writer.writerow([
+                    page.get("page_number", 0),
+                    idx,
+                    line.get("text", ""),
+                    line.get("confidence", ""),
+                    ",".join(str(v) for v in bbox),
+                ])
+        return output.getvalue()
+
+    @staticmethod
+    def export_pdf_docx(result_dict: dict) -> bytes:
+        """Export PDF OCR result as .docx with per-page sections."""
+        try:
+            from docx import Document
+        except ImportError:
+            raise ImportError("python-docx is required for DOCX export. Install with: pip install python-docx")
+
+        doc = Document()
+        doc.add_heading(f"PDF OCR Result: {result_dict.get('filename', 'document')}", level=1)
+        doc.add_paragraph(f"Total Pages: {result_dict.get('total_pages', 0)}")
+        doc.add_paragraph(f"Total Text Lines: {result_dict.get('total_text_lines', 0)}")
+
+        pages = result_dict.get("pages", [])
+        for page in pages:
+            page_num = page.get("page_number", 0)
+            full_text = page.get("full_text", "")
+            lines = page.get("lines", [])
+
+            doc.add_heading(f"Page {page_num}", level=2)
+
+            if full_text:
+                doc.add_paragraph(full_text)
+            elif lines:
+                text_lines = [line.get("text", "") for line in lines]
+                doc.add_paragraph("".join(text_lines))
+            else:
+                doc.add_paragraph("(No text detected on this page)")
+
+            if lines:
+                doc.add_heading(f"Page {page_num} — Line Details", level=3)
+                table = doc.add_table(rows=1, cols=4)
+                hdr_cells = table.rows[0].cells
+                hdr_cells[0].text = "Index"
+                hdr_cells[1].text = "Text"
+                hdr_cells[2].text = "Confidence"
+                hdr_cells[3].text = "Bounding Box"
+
+                for idx, line in enumerate(lines):
+                    row_cells = table.add_row().cells
+                    row_cells[0].text = str(idx)
+                    row_cells[1].text = line.get("text", "")
+                    row_cells[2].text = str(line.get("confidence", ""))
+                    bbox = line.get("bounding_box", [])
+                    row_cells[3].text = f"[{bbox[0]:.0f}, {bbox[1]:.0f}, {bbox[2]:.0f}, {bbox[3]:.0f}]" if bbox else ""
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+        return buf.getvalue()

@@ -27,7 +27,7 @@ interface CardProps {
  */
 export function Card({ title, description, children, className = '' }: CardProps) {
   return (
-    <div className={`rounded-xl border border-gray-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/50 shadow-sm backdrop-blur-sm ${className}`}>
+    <div className={`rounded-xl border border-gray-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/50 shadow-sm backdrop-blur-sm overflow-hidden ${className}`}>
       {(title || description) && (
         <div className="px-5 pt-5 pb-2">
           {title && (
