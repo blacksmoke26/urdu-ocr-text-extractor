@@ -17,6 +17,11 @@ PyMuPDF>=1.23.0                      # pip install pymupdf (lowercase on PyPI)
 # ── Urdu/Arabic text cleaning ───────────────────────────────────
 arabic-reshaper>=3.0.0             # Arabic script reshaping
 PyArabic>=0.6.0                    # Arabic character normalization
+urduhack>=1.0.0                    # Urdu NLP: spelling correction, word frequencies (optional but recommended)
+
+# ── Spell Check Engine ──────────────────────────────────────────
+# The spell checker in engine/spell_checker/ automatically uses urduhack if available.
+# Without it, the engine falls back to heuristic scoring from urdu-dict data.
 
 # ── Export (optional — python-docx only needed for DOCX export) ─
 python-docx>=0.8.11                # .docx document generation (optional, install via install_deps.py)

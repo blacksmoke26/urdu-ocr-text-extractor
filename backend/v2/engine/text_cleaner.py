@@ -2,25 +2,40 @@
 
 New in this version:
 - Character-level confusion map for common OCR errors in Urdu
-- Context-aware word-level correction with dictionary-based approach
-- Toggle via ENV var URDUTEXT_AUTOCORRECT_ENABLED
+- Dictionary-based correction with Levenshtein distance (from urdu-dict data)
+- Context-aware word-level correction with n-gram scoring
+- Optional UrduHack integration for advanced spelling correction
+- Three modes: "char" (fast), "distance" (balanced), "hybrid" (best quality)
+- Toggle via ENV var URDUTEXT_AUTOCORRECT_ENABLED + URDUTEXT_AUTOCORRECT_MODE
 """
 
 from __future__ import annotations
 
+import os
 import re
+from typing import Optional
 
 try:
-    import arabic_reshaper
+    import arabic_reshaper  # noqa: F401
     HAS_ARABIC_RESHAPER = True
 except ImportError:
     HAS_ARABIC_RESHAPER = False
 
+def _has_arabic_reshaper() -> bool:
+    """Check if arabic_reshaper is available."""
+    return HAS_ARABIC_RESHAPER
+
+
 try:
-    import PyArabic
+    import PyArabic  # noqa: F401
     HAS_PYARABIC = True
 except ImportError:
     HAS_PYARABIC = False
+
+
+def _has_pyarabic() -> bool:
+    """Check if PyArabic is available."""
+    return HAS_PYARABIC
 
 
 # ── Urdu Character Confusion Map ────────────────────────────────
@@ -38,7 +53,7 @@ CHAR_CONFUSIONS = {
 
     # ک/گ — Persian vs Urdu Kaf/Gaf
     "\u06A9": "\u06AF",  # ک (Persian) -> گ (Urdu)
-    "\u06AF": "\u06A9",  # گ (Urdu) -> ک (Persian) — also valid direction
+    "\u06AF": "\u06A9",  # گ (Urdu) -> ک (Persian)
 
     # ی/ئ — Urdu Yeh vs Hamza on Yeh
     "\u06CC": "\u0626",  # ی (linking) -> ئ (non-linking)
@@ -50,62 +65,37 @@ CHAR_CONFUSIONS = {
 
     # و/ؤ — Waw vs Hamza on Waw
     "\u0648": "\u0656",  # و -> ؤ
-
-    # أ/إ/آ -> already handled by normalize_alef
-}
-
-# Common Urdu words for dictionary-based correction
-# Format: common OCR misspelling -> correct spelling
-URDU_WORD_DICT = {
-    # Very common Urdu words and their typical OCR errors
-    "ہے": "ہے",
-    "یہ": "یہ",
-    "وہ": "وہ",
-    "اور": "اور",
-    "بھی": "بھی",
-    "تم": "تم",
-    "میں": "میں",
-    "کی": "کی",
-    "کا": "کا",
-    "کو": "کو",
-    "نے": "نے",
-    "پر": "پر",
-    " میں": " میں",
-
-    # Common English word confusions in Urdu text
-    "ٹو": "تو",
-    "کے": "کے",
-    "لوگ": "لोग",  # Actually لوگ is correct, لوگ is Hindi
-
-    # Numbers - Eastern Arabic numerals often confused with standard
-    "٠": "0",
-    "١": "1", 
-    "٢": "2",
-    "٣": "3",
-    "٤": "4",
-    "۵": "5",
-    "۶": "6",
-    "۷": "7",
-    "۸": "8",
-    "۹": "9",
-
-    # Common phrases
-    "السلام": "السلام",
-    "علیہ": "علیہ",
-    "صللی": "صلی",  # Common OCR double char error
-    "للہ": "لہ",   # Common OCR extra character
 }
 
 
 class TextCleaner:
-    """Apply Urdu/Arabic text cleaning transformations."""
+    """Apply Urdu/Arabic text cleaning transformations with optional spell checking."""
+
+    # Lazy-loaded spell checker singleton
+    _spell_checker: Optional["object"] = None  # type: ignore[type-arg]
+
+    @staticmethod
+    def _ensure_spell_checker():
+        """Lazy-initialize the UrduSpellChecker on first use."""
+        if TextCleaner._spell_checker is None:
+            from engine.spell_checker import UrduSpellChecker
+            mode = os.environ.get("URDUTEXT_AUTOCORRECT_MODE", "hybrid").lower()
+            # Only enable n-gram for hybrid mode (context-aware)
+            ngram_order = 2 if mode == "hybrid" else 1
+            TextCleaner._spell_checker = UrduSpellChecker(
+                max_distance=int(os.environ.get("SPELL_CHECK_MAX_DISTANCE", "2")),
+                use_word_freq=os.environ.get("SPELL_CHECK_USE_WORD_FREQ", "true").lower() == "true",
+                ngram_order=ngram_order,
+            )
+        return TextCleaner._spell_checker  # type: ignore[return-value]
 
     @staticmethod
     def reshape(text: str) -> str:
         """Reshape Arabic script for correct visual rendering."""
-        if not HAS_ARABIC_RESHAPER:
+        if not _has_arabic_reshaper():
             return text
         try:
+            import arabic_reshaper  # noqa: F401
             return arabic_reshaper.reshape(text)
         except Exception:
             return text
@@ -162,12 +152,12 @@ class TextCleaner:
     @staticmethod
     def autocorrect_char(text: str) -> tuple[str, dict]:
         """Character-level auto-correction using confusion map.
-        
+
         Returns (corrected_text, correction_stats).
         """
-        corrections = {"applied": 0, "characters": []}
+        corrections = {"applied": 0, "characters": [], "words": []}
         result = []
-        
+
         for ch in text:
             if ch in CHAR_CONFUSIONS:
                 corrected = CHAR_CONFUSIONS[ch]
@@ -180,53 +170,75 @@ class TextCleaner:
                 })
             else:
                 result.append(ch)
-        
+
         return "".join(result), corrections
 
     @staticmethod
-    def autocorrect_context(text: str) -> tuple[str, dict]:
-        """Context-aware word-level auto-correction using dictionary lookup.
-        
+    def autocorrect_dict(text: str) -> tuple[str, dict]:
+        """Dictionary-based auto-correction using Levenshtein distance.
+
+        Uses the urdu-dict word list for candidate generation and scoring.
         Returns (corrected_text, correction_stats).
         """
-        corrections = {"applied": 0, "words": []}
-        
-        # Normalize first
-        text = TextCleaner.normalize_alef(text)
-        text = TextCleaner.normalize_tatil(text)
-        
-        # Split into words while preserving whitespace
-        words = re.split(r'(\s+)', text)
-        
-        for i, word in enumerate(words):
-            if not word:
-                continue
-            
-            # Skip very short words and pure whitespace
-            if len(word) < 2 or re.match(r'^\s+$', word):
-                continue
-            
-            # Apply character-level corrections first (handles partial matches)
-            corrected = word
-            for old, new in CHAR_CONFUSIONS.items():
-                corrected = corrected.replace(old, new)
-            
-            # Dictionary lookup - check both the word and its reshaped form
-            if corrected in URDU_WORD_DICT:
-                replacement = URDU_WORD_DICT[corrected]
-                if replacement != corrected:
-                    words[i] = replacement
-                    corrections["applied"] += 1
-                    corrections["words"].append({
-                        "from": word,
-                        "to": replacement,
-                        "pos": i,
-                    })
-            elif corrected in URDU_WORD_DICT.values():
-                # Already correct, keep as-is
-                words[i] = corrected
-        
-        return "".join(words), corrections
+        spell_checker = TextCleaner._ensure_spell_checker()
+        corrected, stats = spell_checker.correct(text, mode="distance")  # type: ignore[attr-defined]
+
+        # Stats transformation for backward compatibility with old text_cleaner API
+        transformed_stats: dict = {
+            "applied": 0,
+            "characters": [],
+            "words": [],
+        }
+        transformed_stats["applied"] = stats.get("applied", 0)
+        if "characters" in stats:
+            transformed_stats["characters"] = [
+                {"from": c.get("from"), "to": c.get("to"), "pos": c.get("pos")}
+                for c in stats["characters"]
+            ]
+        if "words" in stats:
+            transformed_stats["words"] = [
+                {"from": w.get("from"), "to": w.get("to"), "pos": w.get("pos", -1)}
+                for w in stats["words"]
+            ]
+
+        return corrected, transformed_stats
+
+    @staticmethod
+    def autocorrect_context(text: str) -> tuple[str, dict]:
+        """Context-aware word-level auto-correction using hybrid mode.
+
+        Combines: confusion map + Levenshtein dictionary lookup + n-gram context scoring.
+        Optionally uses UrduHack if available.
+
+        Returns (corrected_text, correction_stats).
+        """
+        spell_checker = TextCleaner._ensure_spell_checker()
+        corrected, stats = spell_checker.correct(text, mode="hybrid")  # type: ignore[attr-defined]
+
+        # Stats transformation for backward compatibility
+        transformed_stats: dict = {
+            "applied": 0,
+            "characters": [],
+            "words": [],
+        }
+        transformed_stats["applied"] = stats.get("applied", 0)
+        if "characters" in stats:
+            transformed_stats["characters"] = [
+                {"from": c.get("from"), "to": c.get("to"), "pos": c.get("pos")}
+                for c in stats["characters"]
+            ]
+        if "words" in stats:
+            transformed_stats["words"] = [
+                {
+                    "from": w.get("from"),
+                    "to": w.get("to"),
+                    "pos": w.get("pos", -1),
+                    "reason": w.get("reason", ""),
+                }
+                for w in stats["words"]
+            ]
+
+        return corrected, transformed_stats
 
     @staticmethod
     def clean(text: str, diacritics: bool = False, normalize_alef_chars: bool = True,
@@ -250,7 +262,7 @@ class TextCleaner:
     @staticmethod
     def clean_and_autocorrect(
         text: str,
-        mode: str = "char",  # "char" or "context"
+        mode: str = "hybrid",  # "char" | "distance" | "context" (context=hybrid)
         diacritics: bool = False,
         normalize_alef_chars: bool = True,
         normalize_tatil: bool = True,
@@ -258,7 +270,12 @@ class TextCleaner:
         normalize_whitespace: bool = True,
     ) -> tuple[str, dict]:
         """Apply cleaning + auto-correction pipeline.
-        
+
+        Modes:
+        - "char":       Character confusion map only (fastest)
+        - "distance":   Dictionary lookup with Levenshtein distance (balanced)
+        - "context"/"hybrid": Full hybrid with n-gram scoring + UrduHack (best quality)
+
         Returns (cleaned_text, correction_stats).
         """
         # Step 1: Standard cleaning
@@ -271,10 +288,12 @@ class TextCleaner:
             normalize_whitespace=normalize_whitespace,
         )
 
-        # Step 2: Auto-correction
+        # Step 2: Auto-correction based on mode
         if mode == "char":
             corrected, stats = TextCleaner.autocorrect_char(cleaned)
-        elif mode == "context":
+        elif mode == "distance":
+            corrected, stats = TextCleaner.autocorrect_dict(cleaned)
+        elif mode in ("context", "hybrid"):
             corrected, stats = TextCleaner.autocorrect_context(cleaned)
         else:
             return cleaned, {}

@@ -15,6 +15,8 @@ from config import (
     CACHE_TTL_SECONDS,
     DEFAULT_CONF_THRESHOLD,
     DEFAULT_IMG_SIZE,
+    SPELL_CHECK_MAX_DISTANCE,
+    SPELL_CHECK_USE_WORD_FREQ,
     TEXT_CLEANING_ENABLED,
     URDUTEXT_AUTOCORRECT_ENABLED,
     URDUTEXT_AUTOCORRECT_MODE,
@@ -151,6 +153,10 @@ class OCRService:
             autocorrect_enabled = text_cleaning.get("autocorrect", autocorrect_enabled)
             if "autocorrect_mode" in text_cleaning:
                 autocorrect_mode = text_cleaning["autocorrect_mode"]
+            if "max_distance" in text_cleaning:
+                options["spell_check_max_distance"] = text_cleaning["max_distance"]
+            if "use_word_freq" in text_cleaning:
+                options["spell_check_use_word_freq"] = text_cleaning["use_word_freq"]
         else:
             options = {
                 "diacritics": False,
@@ -161,11 +167,17 @@ class OCRService:
             }
 
         cleaned_lines = []
+        total_corrections = 0
         for line in result.lines:
             if autocorrect_enabled and autocorrect_mode:
+                # Re-initialize spell checker with per-request settings
+                from engine.text_cleaner import TextCleaner
+                TextCleaner._spell_checker = None  # Force re-init for new settings
                 cleaned_text, correction_stats = TextCleaner.clean_and_autocorrect(
                     line.text, mode=autocorrect_mode, **options
                 )
+                if correction_stats and correction_stats.get("applied", 0) > 0:
+                    total_corrections += correction_stats["applied"]
             else:
                 cleaned_text = TextCleaner.clean(line.text, **options)
                 correction_stats = None
@@ -182,11 +194,13 @@ class OCRService:
             cleaned_lines.append(new_line)
 
         full_cleaned = "\n".join(l.text for l in cleaned_lines)
-        return OCRResult(
+        ocr_result = OCRResult(
             filename=result.filename, file_type=result.file_type, lines=cleaned_lines,
             full_text=full_cleaned, annotated_image_b64=result.annotated_image_b64,
             processing_time_ms=result.processing_time_ms,
         )
+        ocr_result.corrections_count = total_corrections  # type: ignore
+        return ocr_result
 
     def _dict_to_ocr_result(self, d: dict, text_cleaning: bool | dict = False) -> OCRResult:
         """Convert a cached dict back to an OCRResult object."""

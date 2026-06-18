@@ -98,7 +98,10 @@ async def batch_ocr_endpoint(
             clean_opts = json.loads(text_cleaning)
             # Enable autocorrect if requested via text_cleaning options
             if isinstance(clean_opts, dict) and clean_opts.get("autocorrect"):
-                clean_opts["autocorrect_mode"] = clean_opts.get("autocorrect_mode", "char")
+                clean_opts["autocorrect_mode"] = clean_opts.get("autocorrect_mode", "hybrid")
+                # Pass spell check config options
+                clean_opts.setdefault("max_distance", int(os.environ.get("SPELL_CHECK_MAX_DISTANCE", "2")))
+                clean_opts.setdefault("use_word_freq", os.environ.get("SPELL_CHECK_USE_WORD_FREQ", "true").lower() == "true")
         except Exception:
             clean_opts = True
 
@@ -225,7 +228,10 @@ async def single_ocr_endpoint(
             clean_opts = json.loads(text_cleaning)
             # Enable autocorrect if requested via text_cleaning options
             if isinstance(clean_opts, dict) and clean_opts.get("autocorrect"):
-                clean_opts["autocorrect_mode"] = clean_opts.get("autocorrect_mode", "char")
+                clean_opts["autocorrect_mode"] = clean_opts.get("autocorrect_mode", "hybrid")
+                # Pass spell check config options
+                clean_opts.setdefault("max_distance", int(os.environ.get("SPELL_CHECK_MAX_DISTANCE", "2")))
+                clean_opts.setdefault("use_word_freq", os.environ.get("SPELL_CHECK_USE_WORD_FREQ", "true").lower() == "true")
         except Exception:
             clean_opts = True
 

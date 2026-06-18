@@ -5,6 +5,7 @@ Reads from environment variables with sensible defaults.
 
 import os
 from pathlib import Path
+from typing import Optional
 
 # ─── Base Paths ───────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -93,7 +94,12 @@ TEXT_CLEANING_ENABLED: bool = os.getenv("OCR_TEXT_CLEANING_ENABLED", "true").low
 
 # ─── Urdu Text Auto-Correction ────────────────────────────────
 URDUTEXT_AUTOCORRECT_ENABLED: bool = os.getenv("URDUTEXT_AUTOCORRECT_ENABLED", "false").lower() == "true"
-URDUTEXT_AUTOCORRECT_MODE: str = os.getenv("URDUTEXT_AUTOCORRECT_MODE", "char").lower()  # char | context
+URDUTEXT_AUTOCORRECT_MODE: str = os.getenv("URDUTEXT_AUTOCORRECT_MODE", "hybrid").lower()  # char | distance | hybrid
+
+# ─── Spell Check Settings ──────────────────────────────────────
+SPELL_CHECK_MAX_DISTANCE: int = int(os.getenv("SPELL_CHECK_MAX_DISTANCE", "2"))  # max Levenshtein distance
+SPELL_CHECK_USE_WORD_FREQ: bool = os.getenv("SPELL_CHECK_USE_WORD_FREQ", "true").lower() == "true"
+SPELL_CHECK_DICT_DIR = os.getenv("URDU_DICT_DIR")  # custom dict path (auto-detected if None)
 
 # ─── Detection Enhancements ────────────────────────────────────
 BBOX_PADDING_PERCENT: float = float(os.getenv("BBOX_PADDING_PERCENT", "10"))  # % to expand bounding boxes

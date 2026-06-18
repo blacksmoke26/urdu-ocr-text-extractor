@@ -68,6 +68,7 @@ class OCRResult:
         self.processing_time_ms = processing_time_ms
         self.detected_lines = len(lines)
         self.confidence_stats = _compute_confidence_stats(lines)
+        self.corrections_count: int = 0  # Total corrections applied across all lines
 
     def to_dict(self) -> dict:
         return {
@@ -81,6 +82,7 @@ class OCRResult:
             "processing_time_ms": round(self.processing_time_ms, 2),
             "confidence_stats": self.confidence_stats,
             "thumb_image_b64": getattr(self, "_page_thumb_b64", None),
+            "corrections_count": getattr(self, "corrections_count", 0),
         }
 
 

@@ -130,5 +130,9 @@ async def get_config():
             "rate_limiting_enabled": cfg.RATE_LIMIT_ENABLED,
             "authentication_enabled": cfg.AUTH_ENABLED,
             "text_cleaning_enabled": cfg.TEXT_CLEANING_ENABLED,
+            "autocorrect_enabled": cfg.URDUTEXT_AUTOCORRECT_ENABLED,
+            "autocorrect_mode": cfg.URDUTEXT_AUTOCORRECT_MODE,
+            "spell_check_max_distance": cfg.SPELL_CHECK_MAX_DISTANCE,
+            "spell_check_use_word_freq": cfg.SPELL_CHECK_USE_WORD_FREQ,
         },
     })

@@ -131,7 +131,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
 
     # Include routers
-    from routes import ocr_router, pdf_router, export_router, system_router, realtime_router, analysis_router
+    from routes import ocr_router, pdf_router, export_router, system_router, realtime_router, analysis_router, spell_router
 
     app.include_router(ocr_router)
     app.include_router(pdf_router)
@@ -139,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(system_router)
     app.include_router(realtime_router)
     app.include_router(analysis_router)
+    app.include_router(spell_router)
 
     return app
 
