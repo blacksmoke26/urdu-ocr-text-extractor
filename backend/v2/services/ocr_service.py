@@ -36,7 +36,8 @@ class OCRService:
                   conf_threshold: float = DEFAULT_CONF_THRESHOLD,
                   img_size: int = DEFAULT_IMG_SIZE,
                   text_cleaning: bool | dict = True,
-                  use_cache: bool = True) -> OCRResult:
+                  use_cache: bool = True,
+                  **kwargs: object) -> OCRResult:
         """Run OCR on a single image (raw bytes)."""
         image = Image.open(image_bytes).convert("RGB")
 
@@ -74,7 +75,8 @@ class OCRService:
                       img_size: int = DEFAULT_IMG_SIZE,
                       text_cleaning: bool | dict = True,
                       use_cache: bool = True,
-                      interrupt_event: threading.Event | None = None) -> list[OCRResult]:
+                      interrupt_event: threading.Event | None = None,
+                      **kwargs: object) -> list[OCRResult]:
         """Run OCR on all pages of a PDF. Stop if interrupt_event is set."""
         import fitz
         from config import THUMB_WIDTH, THUMB_HEIGHT

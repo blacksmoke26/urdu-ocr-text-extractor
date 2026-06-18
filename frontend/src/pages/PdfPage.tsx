@@ -12,15 +12,17 @@
  */
 
 import { useRef, useState } from 'react';
-import { Clock, FileText, Scissors, Search, Square, Timer, UploadCloud, Eye, FileJson, ChevronDown, ChevronUp, SlidersHorizontal, Cpu, Zap, EyeOff, LayoutGrid, Wand2, Sparkles } from 'lucide-react';
+import { Clock, FileText, Scissors, Search, Square, Timer, UploadCloud, Eye, FileJson, ChevronDown, ChevronUp, SlidersHorizontal, Cpu, Zap, EyeOff, LayoutGrid, Wand2, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { cancelPdfOcr, pdfExtract, pdfInfo, pdfOcr } from '#/utils/api/pdf';
 import { Dialog, DialogBody, DialogContent } from '#/components/ui/Dialog';
 import { SelectAdvanced } from '#/components/ui/SelectAdvanced';
 import { useToast } from '#/context/ToastContext';
 import { formatBytes } from '#/utils/file';
 import type {PdfExtractResponse, PdfInfo, PdfOcrPageResult, PdfOcrResponse} from '#/types/api';
+import { PdfViewerModal } from '#/components/ui/PdfViewerModal';
+import { useTheme } from '#/context/ThemeContext';
 
-type PdfTab = 'info' | 'extract' | 'ocr';
+type PdfTab = 'preview' | 'info' | 'extract' | 'ocr';
 
 const isDark = true;
 
@@ -50,9 +52,12 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
     return Math.max(1, to - from + 1);
   })();
 
-  // Image viewer state
+  // Image viewer state (extract tab thumbnails)
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerPage, setViewerPage] = useState<{ page_number: number; image_b64: string } | null>(null);
+
+  // react-pdf modal viewer state
+  const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
 
   // OCR-specific params
   const [confThreshold, setConfThreshold] = useState(0.2);
@@ -69,6 +74,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
   const [postProcessing, setPostProcessing] = useState(true);
 
   const { addToast } = useToast();
+  const { theme } = useTheme();
 
   const handleFile = async (f: File) => {
     if (!f.name.toLowerCase().endsWith('.pdf')) {
@@ -330,6 +336,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
   };
 
   const tabs: { key: PdfTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+    { key: 'preview',  label: 'Preview',    icon: ImageIcon },
     { key: 'info',     label: 'Info',       icon: Search },
     { key: 'extract',  label: 'Extract',    icon: Scissors },
     { key: 'ocr',      label: 'PDF OCR',    icon: FileText },
@@ -823,9 +830,28 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
           </div>
 
           {/* Result */}
-          {result && (tab === 'info' ? renderPdfInfo(result as PdfInfo) : tab === 'extract' ? renderPdfExtract(result as PdfExtractResponse) : renderPdfOcr(result))}
+          {tab === 'preview' && file && (
+            <div className="glass-card rounded-2xl p-6 text-center space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-violet-500/20 bg-violet-500/10 text-violet-400 text-xs font-medium mb-2">
+                <ImageIcon className="h-3 w-3" /> PDF Preview
+              </div>
+              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
+                Click to preview the uploaded PDF before running OCR.
+              </p>
+              <button
+                onClick={() => setPdfViewerOpen(true)}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:scale-[1.02] transition-all"
+              >
+                <Eye className="h-4 w-4" /> Open PDF Viewer
+              </button>
+            </div>
+          )}
+          {result && tab !== 'preview' && (tab === 'info' ? renderPdfInfo(result as PdfInfo) : tab === 'extract' ? renderPdfExtract(result as PdfExtractResponse) : renderPdfOcr(result))}
         </>
       )}
+
+      {/* react-pdf full-screen viewer modal */}
+      <PdfViewerModal file={file} open={pdfViewerOpen} onOpenChange={setPdfViewerOpen} dark={theme === 'dark'} />
     </div>
   );
 }
