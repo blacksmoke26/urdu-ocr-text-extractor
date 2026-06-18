@@ -495,8 +495,8 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
       <>
         <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>{data.total_pages} pages · {data.total_text_lines} lines</p>
 
-        {/* ── Horizontal Result Cards ──────────── */}
-        <div className="flex items-stretch gap-4 overflow-x-auto pb-4">
+        {/* ── Result Cards (Vertical Grid) ─────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {pages.map((pg: PdfOcrPageResult, idx: number) => {
             const isSuccess = pg.status === 'success';
             const isExpanded = expandedPdfOcrIdx === idx;
@@ -505,7 +505,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
             const linesCount = (pg as any)?.lines?.length ?? pg.detected_lines ?? 0;
 
             return (
-              <div key={idx} className={`min-w-[340px] max-w-[380px] flex-1 rounded-xl border transition-all duration-200 ${isDark ? 'bg-white/[0.02] border-slate-700/50' : 'bg-gray-50 border-gray-200'} ${isExpanded ? (isDark ? 'ring-2 ring-violet-500/40 border-violet-500/30' : 'ring-2 ring-violet-400/40') : ''}`}>
+              <div key={idx} className={`rounded-xl border transition-all duration-200 ${isDark ? 'bg-white/[0.02] border-slate-700/50' : 'bg-gray-50 border-gray-200'} ${isExpanded ? (isDark ? 'ring-2 ring-violet-500/40 border-violet-500/30' : 'ring-2 ring-violet-400/40') : ''}`}>
                 {/* Card header: image thumbnail + status */}
                 <div className="flex items-start gap-3 mb-3 p-4 pb-0">
                   {/* Thumbnail image — clickable to expand */}
@@ -562,7 +562,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                   </div>
                   <div className={`rounded-lg px-3 py-2.5 border max-h-[160px] overflow-y-auto ${isDark ? 'bg-white/[0.02] border-slate-700/40' : 'bg-gray-100 border-gray-200'}`}>
                     {isSuccess ? (
-                      <p className="rtl font-urdu text-right leading-relaxed text-sm " dir="rtl">
+                      <p className="rtl urdu-font text-right leading-relaxed text-sm" dir="rtl" style={{lineHeight:'2.2'}}>
                         {previewText || (
                           <span className={`${isDark ? 'text-slate-600' : 'text-gray-400'} italic`}></span>
                         )}
@@ -665,7 +665,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                           </button>
                         </div>
                         <div className={`rounded-xl px-4 py-3 border leading-loose max-h-[300px] overflow-y-auto ${isDark ? 'bg-white/[0.02] border-slate-700/60' : 'bg-gray-50 border-gray-200'}`}>
-                          <p className="rtl text-right leading-relaxed text-base " dir="rtl">
+                          <p className="rtl urdu-font text-right leading-relaxed text-base" dir="rtl" style={{lineHeight:'2.4', color: isDark ? '#e2e8f0' : '#0f172a'}}>
                             {pages[expandedPdfOcrIdx]?.full_text || (
                               <span className={`${isDark ? 'text-slate-600' : 'text-gray-400'} italic`}></span>
                             )}
@@ -696,7 +696,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                               {(pages[expandedPdfOcrIdx] as any).lines.map((line: any, i: number) => (
                                 <tr key={i} className={`border-t transition-colors ${isDark ? 'border-slate-800/50 hover:bg-white/[0.02]' : 'border-gray-100 hover:bg-gray-50'}`}>
                                   <td className={`py-2 px-4 font-mono text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{i + 1}</td>
-                                  <td className={`py-2 px-4 rtl text-right`} dir="rtl"><span className={isDark ? 'text-slate-200' : 'text-gray-800'}>{line.text}</span></td>
+                                  <td className={`py-2 px-4 rtl urdu-font text-right`} dir="rtl"><span className={isDark ? 'text-slate-200' : 'text-gray-800'} style={{lineHeight:'2'}}>{line.text}</span></td>
                                   <td className={`py-2 px-4`}>
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${confBg(line.confidence)}`}>
                                       {Math.round(line.confidence * 100)}%
@@ -933,7 +933,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                 {/* Advanced section — animated expand/collapse */}
                 {advancedOpen && (
                   <div
-                    className="mt-5 pt-5 border-t space-y-5"
+                    className="mt-5 pt-5 border-t border-slate-700/50 space-y-5"
                     style={{ animation: 'float-up 0.25s ease-out both' }}
                   >
                     {/* Model + Det Conf + Device row */}
@@ -990,9 +990,6 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                           ]}
                         />
                       </div>
-
-                      {/* Divider between numeric + toggles columns */}
-                      <div className={`hidden sm:block w-px self-stretch ${isDark ? 'bg-slate-700/50' : 'bg-gray-200'}`} />
                     </div>
 
                     {/* Feature Toggles */}
