@@ -4,26 +4,71 @@
  * @see https://github.com/blacksmoke26
  */
 
-import { useCallback, useRef, useState, useEffect, useMemo } from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import { Fragment } from 'react';
 import {
-  Upload, FileImage, Copy, CheckCircle2, AlertTriangle, Loader2, Settings2, Sparkles, Image as ImageIcon,
-  ClipboardPaste, Brain, BookOpen, Mic, Hash, Info, X, SlidersHorizontal, ChevronDown, ChevronUp,
-  Grid3X3, Trash2, ZoomIn, RotateCw, Minus, Plus, Layers, Wand2, Sun, Moon, Eye, FileText,
-  Maximize2, Type,
+  AlertTriangle,
+  BookOpen,
+  BookText,
+  Brain,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  ClipboardPaste,
+  Copy,
+  Eye,
+  FileImage,
+  Hash,
+  Image as ImageIcon,
+  Info,
+  Layers,
+  Loader2,
+  Maximize2,
+  Mic,
+  Minus,
+  RotateCw,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  Sun,
+  Trash2,
+  Type,
+  Upload,
+  Wand2,
+  X,
+  ZoomIn,
+  Download,
 } from 'lucide-react';
-import { ocrSingle, ocrEnhanced, ocrBatch } from '#/utils/api/ocr';
-import type { OcrResult, OcrLine, ConfidenceStats, BatchOcrResponse } from '#/types/api';
-import { useToast } from '#/context/ToastContext';
-import { formatBytes, isImageFile } from '#/utils/file';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogBody,
-} from '#/components/ui/Dialog';
+import {ocrBatch, ocrEnhanced, ocrSingle} from '#/utils/api/ocr';
+import {spellCheck} from '#/utils/api/spell';
+import type {BatchOcrResponse, ConfidenceStats, OcrLine, OcrResult, SpellCorrection} from '#/types/api';
+import {useToast} from '#/context/ToastContext';
+import {formatBytes, isImageFile} from '#/utils/file';
+import {Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle} from '#/components/ui/Dialog';
 
 const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/gif'];
+
+// ─── Spell Check Settings ────────────────────────────────────────
+
+interface SpellSettings {
+  enabled: boolean;
+  mode: 'char' | 'distance' | 'hybrid';
+  maxDistance: number;
+  useWordFreq: boolean;
+}
+
+const defaultSpellSettings: SpellSettings = {
+  enabled: false,
+  mode: 'hybrid',
+  maxDistance: 2,
+  useWordFreq: true,
+};
+
+const spellModes = [
+  { value: 'char', label: 'Character Map' },
+  { value: 'distance', label: 'Dictionary (Levenshtein)' },
+  { value: 'hybrid', label: 'Hybrid (Best Quality)' },
+] as const;
 
 // ─── Enhancement presets ────────────────────────────────────────
 
@@ -192,6 +237,16 @@ export function OcrPage({ onResult }: OcrPageProps) {
   const [activeResultTab, setActiveResultTab] = useState(0);
   const [previewFilter, setPreviewFilter] = useState('none');
 
+  // ─── Spell Check Settings State ─────────────────────────────
+  const [spellOpen, setSpellOpen] = useState(false);
+  const [spellSettings, setSpellSettings] = useState<SpellSettings>(defaultSpellSettings);
+  const [spellCorrections, setSpellCorrections] = useState<readonly SpellCorrection[]>([]);
+  const [spellPreviewText, setSpellPreviewText] = useState('');
+  const [spellPreviewLoading, setSpellPreviewLoading] = useState(false);
+
+  // ─── Preview corrections for OCR result lines ──────────────
+  const [correctionHighlights, setCorrectionHighlights] = useState<Record<string, SpellCorrection[]>>({});
+
   // Horizontal card / modal state
   const [expandedCardIdx, setExpandedCardIdx] = useState<number | null>(null);
 
@@ -247,7 +302,8 @@ export function OcrPage({ onResult }: OcrPageProps) {
       if (item.type.startsWith('image/')) {
         e.preventDefault();
         const blob = item.getAsFile();
-        if (blob && addFile(blob)) addToast('Image pasted.', 'success');
+        const file = blobToFile(blob!);
+        if (file && addFile(file)) addToast('Image pasted.', 'success');
         return;
       }
     }
@@ -265,6 +321,35 @@ export function OcrPage({ onResult }: OcrPageProps) {
     handleFiles(e.dataTransfer.files);
   }, [handleFiles]);
 
+  /* ── Preview spell correction ─────────────────────────── */
+
+  const runSpellPreview = useCallback(async (text: string) => {
+    if (!spellSettings.enabled || !text.trim()) return;
+    setSpellPreviewLoading(true);
+    try {
+      const res = await spellCheck(text, spellSettings.mode);
+      setSpellPreviewText(res.corrected);
+      setSpellCorrections(res.words_corrected.filter(w => w.from !== w.to));
+    } catch {
+      // Silently fail
+    } finally {
+      setSpellPreviewLoading(false);
+    }
+  }, [spellSettings.enabled, spellSettings.mode]);
+
+  /* ── Build correction highlights from current spell corrections ─────── */
+
+  const buildCorrectionHighlights = useCallback((text: string, corrections: readonly SpellCorrection[]): Record<string, SpellCorrection[]> => {
+    if (!corrections?.length || !text) return {};
+    const map: Record<string, SpellCorrection[]> = {};
+    corrections.forEach(c => {
+      if (c.from === c.to) return;
+      const idx = text.indexOf(c.from);
+      if (idx !== -1) map[idx.toString()] = [c];
+    });
+    return map;
+  }, []);
+
   /* ── Remove file from selection ─────────────────── */
 
   const removeFile = useCallback((idx: number) => {
@@ -272,7 +357,20 @@ export function OcrPage({ onResult }: OcrPageProps) {
     setPreviews(prev => prev.filter((_, i) => i !== idx));
   }, []);
 
+  /* ── Blob to File conversion ─────────────────── */
+
   /* ── OCR processing ─────────────────────────────── */
+
+  // Build spell check params to pass through the API layer
+  const spellApiParams = useMemo(() => {
+    if (!spellSettings.enabled) return undefined;
+    return {
+      autocorrect: true,
+      autocorrect_mode: spellSettings.mode,
+      spell_check_max_distance: spellSettings.maxDistance,
+      spell_check_use_word_freq: spellSettings.useWordFreq,
+    };
+  }, [spellSettings]);
 
   const runOcr = useCallback(async () => {
     if (files.length === 0) return;
@@ -293,7 +391,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
         if (!useEnhance && files.length >= 2) {
           // Use batch endpoint for efficiency
           try {
-            const batchResponse: BatchOcrResponse = await ocrBatch(files, undefined, (pct) => setProgress(pct));
+            const batchResponse: BatchOcrResponse = await ocrBatch(files, spellApiParams, (pct) => setProgress(pct));
             finalResults = batchResponse.results;
             setResults(finalResults);
             addToast(`OCR complete — ${batchResponse.completed} of ${batchResponse.total_files} images processed.`, 'success');
@@ -301,7 +399,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
             // Fallback: process individually
             for (let i = 0; i < files.length; i++) {
               setCurrentFileIndex(i);
-              const result = await ocrSingle(files[i], undefined, (pct) => setProgress(pct));
+              const result = await ocrSingle(files[i], spellApiParams, (pct) => setProgress(pct));
               finalResults.push(result);
               setResults([...finalResults]);
             }
@@ -354,7 +452,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
       setLoading(false);
       setCurrentFileIndex(0);
     }
-  }, [files, hasActiveToggles, hasActiveSliders, activeEnhanceOptions, addToast, onResult]);
+  }, [files, hasActiveToggles, hasActiveSliders, activeEnhanceOptions, spellApiParams, addToast, onResult]);
 
   /* ── Export helpers ─────────────────────────────── */
 
@@ -506,6 +604,152 @@ export function OcrPage({ onResult }: OcrPageProps) {
           )}
         </div>
 
+        {/* ── Spell Check Options ─────────────────────── */}
+        <div className="mt-4">
+          <button
+            onClick={() => setSpellOpen(!spellOpen)}
+            className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white transition-colors cursor-pointer"
+          >
+            <ShieldCheck className={`h-4 w-4 ${spellSettings.enabled ? 'text-emerald-400' : ''}`} />
+            Spell Check
+            {spellSettings.enabled && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium capitalize">{spellSettings.mode}</span>
+            )}
+            {spellOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+
+          {spellOpen && (
+            <div className="mt-3 space-y-4 animate-fade-in">
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.02] border border-slate-700/30">
+                <span className="text-sm text-slate-300">Enable auto-correction</span>
+                <button
+                  onClick={() => setSpellSettings(prev => ({ ...prev, enabled: !prev.enabled }))}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${spellSettings.enabled ? 'bg-emerald-500' : 'bg-slate-600'} cursor-pointer`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${spellSettings.enabled ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+
+              {spellSettings.enabled && (
+                <>
+                  {/* Mode selector */}
+                  <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-700/30 space-y-3">
+                    <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Correction Mode</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      {spellModes.map(mode => (
+                        <button
+                          key={mode.value}
+                          onClick={() => setSpellSettings(prev => ({ ...prev, mode: mode.value }))}
+                          className={`px-3 py-2 rounded-lg text-xs font-medium transition-all border ${
+                            spellSettings.mode === mode.value
+                              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                              : 'bg-white/[0.02] text-slate-400 border-slate-700/30 hover:border-slate-600'
+                          }`}
+                        >
+                          {mode.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Max Distance slider */}
+                  <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-700/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-300">Max Edit Distance</span>
+                      <span className="text-sm font-mono text-emerald-400">{spellSettings.maxDistance}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={4}
+                      step={1}
+                      value={spellSettings.maxDistance}
+                      onChange={(e) => setSpellSettings(prev => ({ ...prev, maxDistance: Number(e.target.value) }))}
+                      className="w-full accent-emerald-500"
+                    />
+                    <span className="text-xs text-slate-500">Higher values catch more errors but are slower</span>
+                  </div>
+
+                  {/* Use Word Frequency toggle */}
+                  <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.02] border border-slate-700/30">
+                    <div>
+                      <span className="text-sm text-slate-300">Use Word Frequency</span>
+                      <p className="text-xs text-slate-500 mt-0.5">Weight corrections by UrduHack frequencies</p>
+                    </div>
+                    <button
+                      onClick={() => setSpellSettings(prev => ({ ...prev, useWordFreq: !prev.useWordFreq }))}
+                      className={`relative w-11 h-6 rounded-full transition-colors ${spellSettings.useWordFreq ? 'bg-emerald-500' : 'bg-slate-600'} cursor-pointer`}>
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${spellSettings.useWordFreq ? 'translate-x-5' : ''}`} />
+                    </button>
+                  </div>
+
+                  {/* Spell Preview */}
+                  <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-700/30 space-y-3">
+                    <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Preview</span>
+                    <textarea
+                      rows={3}
+                      value={spellPreviewText}
+                      onChange={(e) => {
+                        setSpellPreviewText(e.target.value);
+                        void runSpellPreview(e.target.value);
+                      }}
+                      placeholder="Type text here to preview spell corrections..."
+                      className="w-full rounded-lg px-3 py-2 bg-slate-800/50 border border-slate-700 text-sm text-white placeholder:text-slate-600 resize-none focus:outline-none focus:border-emerald-500/50"
+                    />
+                    {spellPreviewLoading && (
+                      <div className="flex items-center gap-2 text-xs text-slate-400">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Analyzing...
+                      </div>
+                    )}
+                    {spellCorrections.length > 0 && (
+                      <div className="space-y-3">
+                        <span className="text-xs font-medium text-emerald-400">{spellCorrections.length} correction(s) detected:</span>
+                        {/* Inline highlights showing corrections applied within the OCR result */}
+                        {expandedCardIdx !== null && results[expandedCardIdx]?.full_text && (
+                          <div className="space-y-1.5">
+                            <span className="text-xs text-slate-500">Corrections in this result:</span>
+                            <div className="rounded-lg px-3 py-2 bg-emerald-500/5 border border-emerald-500/20 max-h-[120px] overflow-y-auto">
+                              {(() => {
+                                const highlights = buildCorrectionHighlights(
+                                  results[expandedCardIdx].full_text,
+                                  spellCorrections
+                                );
+                                setCorrectionHighlights(highlights);
+                                return Object.entries(highlights).sort(([a], [b]) => Number(a) - Number(b)).map(([pos, corrections]) => (
+                                  <div key={pos} className="flex items-center gap-2 text-xs">
+                                    <span className="text-slate-500 font-mono">#{pos}:</span>
+                                    {corrections.map((c, i) => (
+                                      <Fragment key={i}>
+                                        <span className="line-through text-red-400 bg-red-500/15 px-1.5 py-0.5 rounded cursor-help" title={c.reason || 'Spelling issue'}>
+                                          {c.from}
+                                        </span>
+                                        <span className="text-slate-600">→</span>
+                                        <span className="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded font-medium">{c.to}</span>
+                                      </Fragment>
+                                    ))}
+                                  </div>
+                                ));
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                        {spellCorrections.map((corr, i) => (
+                          <div key={i} className="flex items-center gap-2 text-xs">
+                            <span className="line-through text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded">{corr.from}</span>
+                            <span className="text-slate-600">→</span>
+                            <span className="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded font-medium">{corr.to}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* ── Enhancement Options ─────────────────── */}
         <div className="mt-4">
           <button
@@ -629,7 +873,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
             </div>
           )}
 
-          {/* Toggle sliders button */}
+      {/* Toggle sliders button */}
           {enhanceOpen && (
             <button
               onClick={() => setSlidersOpen(!slidersOpen)}
@@ -640,12 +884,30 @@ export function OcrPage({ onResult }: OcrPageProps) {
               <Minus className="h-3 w-3" /> Fine Tuning
             </button>
           )}
+
+          {/* AI Insights toggle */}
+          {results.length > 0 && results[activeResultTab] && ((results[activeResultTab] as any).ai_analysis || (results[activeResultTab] as any).summary) && (
+            <button
+              onClick={() => setInsightsOpen(!insightsOpen)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                insightsOpen ? 'bg-violet-500/15 text-violet-400 border border-violet-500/20' : 'bg-white/[0.03] text-slate-400 hover:text-slate-300 border border-slate-700/30'
+              }`}
+            >
+              <Brain className="h-3 w-3" /> AI Insights
+              {insightsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </button>
+          )}
         </div>
       </div>
 
       {/* ── Loading / Processing State ─────────── */}
       {loading && (
         <ProcessingOverlay progress={progress} filesCount={files.length} currentFile={currentFileIndex} />
+      )}
+
+      {/* ── AI Insights Panel ───────────────────── */}
+      {insightsOpen && results[activeResultTab] && ((results[activeResultTab] as any).ai_analysis || (results[activeResultTab] as any).summary) && (
+        <AiInsightsPanel result={results[activeResultTab]} />
       )}
 
       {/* ── Results Section ──────────────────────── */}
@@ -716,10 +978,18 @@ export function OcrPage({ onResult }: OcrPageProps) {
                         <p className="text-xs font-medium text-white truncate">{result.filename ?? `Page ${idx + 1}`}</p>
                       </div>
 
-                      {/* Confidence */}
+                      {/* Confidence + corrections */}
                       {isSuccess && (
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${confidenceBg(meanConf)}`}>
-                          {Math.round(meanConf * 100)}% confidence
+                        <span className="inline-flex items-center gap-1.5 flex-wrap">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${confidenceBg(meanConf)}`}>
+                            {Math.round(meanConf * 100)}% confidence
+                          </span>
+                          {(result as any).corrections_count && (result as any).corrections_count > 0 && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                              <BookText className="h-3 w-3" />
+                              {(result as any).corrections_count} correction{((result as any).corrections_count > 1 ? 's' : '')}
+                            </span>
+                          )}
                         </span>
                       )}
                     </div>
@@ -760,15 +1030,21 @@ export function OcrPage({ onResult }: OcrPageProps) {
                     </div>
                   </div>
 
-                  {/* Expand button — narrower, centered */}
+                  {/* Action buttons */}
                   {isSuccess && (
-                    <div className="flex justify-center px-4 pb-3">
+                    <div className="flex justify-center gap-2 px-4 pb-3">
                       <button
                         onClick={() => setExpandedCardIdx(isExpanded ? null : idx)}
                         className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-white/[0.03] hover:bg-violet-500/15 hover:text-violet-400 text-slate-500 border border-slate-700/30 transition-all cursor-pointer"
                       >
                         {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                         {isExpanded ? 'Collapse' : 'Expand'} Details
+                      </button>
+                      <button
+                        onClick={() => downloadTxt(result)}
+                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-white/[0.03] hover:bg-blue-500/15 hover:text-blue-400 text-slate-500 border border-slate-700/30 transition-all cursor-pointer"
+                      >
+                        <Download className="h-3.5 w-3.5" /> Download .txt
                       </button>
                     </div>
                   )}
@@ -831,9 +1107,28 @@ export function OcrPage({ onResult }: OcrPageProps) {
                           </div>
                           <div className="rounded-xl px-4 py-3 border leading-loose bg-slate-800/50 border-slate-700/60 max-h-[300px] overflow-y-auto">
                             <p className="rtl urdu-font text-right leading-relaxed text-base" dir="rtl" style={{lineHeight:'2.4', color:'#e2e8f0'}}>
-                              {results[expandedCardIdx]?.full_text || (
-                                <span className="text-slate-600 italic">No text detected.</span>
-                              )}
+                              {(() => {
+                                const raw = results[expandedCardIdx]?.full_text || 'No text detected.';
+                                if (!correctionHighlights || Object.keys(correctionHighlights).length === 0) return raw;
+                                const segments = Object.entries(correctionHighlights).sort(([a], [b]) => Number(a) - Number(b));
+                                let lastIdx = 0;
+                                return raw.split('').map((ch, i) => {
+                                  if (i >= lastIdx) {
+                                    const match = segments.find(([posStr]) => i === Number(posStr));
+                                    if (match) {
+                                      const [pos, corrections] = match;
+                                      const replacementSpan = corrections.map((c, j) => (
+                                        <span key={`${pos}-${j}`} className="line-through text-red-400 bg-red-500/15 px-0.5 rounded cursor-help" title={c.reason || 'Spelling issue'}>
+                                          {c.from}
+                                        </span>
+                                      ));
+                                      lastIdx = Number(pos) + corrections[0].from.length;
+                                      return <span key={i} className="inline-block">{replacementSpan}</span>;
+                                    }
+                                  }
+                                  return <span key={i} className="text-slate-300">{ch}</span>;
+                                });
+                              })()}
                             </p>
                           </div>
                         </div>
@@ -892,6 +1187,34 @@ export function OcrPage({ onResult }: OcrPageProps) {
                           ))}
                         </div>
                       </div>
+
+                      {/* Cache stats */}
+                      {((results[expandedCardIdx] as any).cache_stats && ((results[expandedCardIdx] as any).cache_stats.hits > 0 || (results[expandedCardIdx] as any).cache_stats.misses > 0)) && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-white mb-3">Cache Performance</h4>
+                          <div className="grid grid-cols-3 gap-3">
+                            {(() => {
+                              const cs = (results[expandedCardIdx] as any).cache_stats;
+                              return cs ? (
+                                <>
+                                  <div className="rounded-xl px-3 py-2.5 bg-emerald-500/5 border border-emerald-500/20">
+                                    <div className="text-xs text-slate-400 mb-1">Hits</div>
+                                    <div className="text-lg font-bold text-emerald-400">{cs.hits}</div>
+                                  </div>
+                                  <div className="rounded-xl px-3 py-2.5 bg-red-500/5 border border-red-500/20">
+                                    <div className="text-xs text-slate-400 mb-1">Misses</div>
+                                    <div className="text-lg font-bold text-red-400">{cs.misses}</div>
+                                  </div>
+                                  <div className="rounded-xl px-3 py-2.5 bg-blue-500/5 border border-blue-500/20">
+                                    <div className="text-xs text-slate-400 mb-1">Cache Entries</div>
+                                    <div className="text-lg font-bold text-blue-400">{cs.entries}</div>
+                                  </div>
+                                </>
+                              ) : null;
+                            })()}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="text-center py-12">

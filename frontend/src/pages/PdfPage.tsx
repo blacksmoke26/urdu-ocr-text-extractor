@@ -11,7 +11,7 @@
  * Each tab uses the appropriate v2 API endpoint via axios.
  */
 
-import {useRef, useState} from 'react';
+import {useCallback, useRef, useState} from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -30,6 +30,8 @@ import {
   Type,
   UploadCloud,
   Wand2,
+  Info,
+  BookText,
 } from 'lucide-react';
 import {Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle} from '#/components/ui/Dialog';
 import {SelectAdvanced} from '#/components/ui/SelectAdvanced';
@@ -38,7 +40,8 @@ import {useToast} from '#/context/ToastContext';
 import {useTheme} from '#/context/ThemeContext';
 import {formatBytes} from '#/utils/file';
 import {cancelPdfOcr, pdfExtract, pdfInfo, pdfOcr} from '#/utils/api/pdf';
-import type {PdfExtractResponse, PdfInfo, PdfOcrPageResult, PdfOcrResponse} from '#/types/api';
+import { spellCheck } from '#/utils/api/spell';
+import type {PdfExtractResponse, PdfInfo, PdfOcrPageResult, PdfOcrResponse, SpellCorrection} from '#/types/api';
 
 type PdfTab = 'preview' | 'info' | 'extract' | 'ocr';
 
@@ -94,6 +97,17 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
   const [layoutAnalysis, setLayoutAnalysis] = useState(false);
   const [postProcessing, setPostProcessing] = useState(true);
 
+  // ─── Spell Check State ──────────────────────────────────────
+  const [spellOpen, setSpellOpen] = useState(false);
+  const [spellEnabled, setSpellEnabled] = useState(false);
+  const [spellMode, setSpellMode] = useState<'char' | 'distance' | 'hybrid'>('hybrid');
+  const [spellMaxDist, setSpellMaxDist] = useState(2);
+  const [spellWordFreq, setSpellWordFreq] = useState(true);
+  const [previewCorrections, setPreviewCorrections] = useState<readonly SpellCorrection[]>([]);
+
+  // Line-level correction cache for preview
+  const [lineCorrections, setLineCorrections] = useState<Record<number, string>>({});
+
   const { addToast } = useToast();
   const { theme } = useTheme();
 
@@ -116,6 +130,19 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
       // Silently ignore — user can still type a value manually
     }
   };
+
+  /* ── Preview spell correction (standalone) ─────────────── */
+
+  const runLinePreview = useCallback(async (lineIdx: number, text: string) => {
+    if (!spellEnabled || !text.trim()) return;
+    try {
+      const res = await spellCheck(text, spellMode);
+      setLineCorrections(prev => ({ ...prev, [lineIdx]: res.corrected }));
+      setPreviewCorrections(res.words_corrected.filter(w => w.from !== w.to));
+    } catch {
+      // Silently fail
+    }
+  }, [spellEnabled, spellMode]);
 
   /* ── Tab handlers ─────────────────────────────────────── */
 
@@ -283,6 +310,11 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
         det_conf: detConf,
         layout_analysis: layoutAnalysis,
         post_processing: postProcessing ? 'default' : '',
+        // Spell check settings
+        autocorrect: spellEnabled,
+        autocorrect_mode: spellMode,
+        spell_check_max_distance: spellMaxDist,
+        spell_check_use_word_freq: spellWordFreq,
       };
       const data = await pdfOcr(file, pageRange.from, pageRange.to ? Number(pageRange.to) : undefined, confThreshold, imgSize, String(textCleaning), undefined, taskId, advancedOptions);
       // Clean up WebSocket on completion
@@ -545,10 +577,18 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                       <p className={`text-xs font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>Page {pg.page_number}</p>
                     </div>
 
-                    {/* Confidence */}
+                    {/* Confidence + corrections */}
                     {isSuccess && (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${confBg(confMean)}`}>
-                        {Math.round(confMean * 100)}% confidence
+                      <span className="inline-flex items-center gap-1.5 flex-wrap">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${confBg(confMean)}`}>
+                          {Math.round(confMean * 100)}% confidence
+                        </span>
+                        {(pg as any).corrections_count && (pg as any).corrections_count > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                            <BookText className="h-3 w-3" />
+                            {(pg as any).corrections_count} correction{((pg as any).corrections_count > 1 ? 's' : '')}
+                          </span>
+                        )}
                       </span>
                     )}
                   </div>
@@ -696,8 +736,29 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                               {(pages[expandedPdfOcrIdx] as any).lines.map((line: any, i: number) => (
                                 <tr key={i} className={`border-t transition-colors ${isDark ? 'border-slate-800/50 hover:bg-white/[0.02]' : 'border-gray-100 hover:bg-gray-50'}`}>
                                   <td className={`py-2 px-4 font-mono text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{i + 1}</td>
-                                  <td className={`py-2 px-4 rtl urdu-font text-right`} dir="rtl"><span className={isDark ? 'text-slate-200' : 'text-gray-800'} style={{lineHeight:'2'}}>{line.text}</span></td>
-                                  <td className={`py-2 px-4`}>
+                                  <td className={`py-2 px-4 rtl urdu-font text-right`} dir="rtl">
+                                    {
+                                      // Show corrected text if available, otherwise raw line.text
+                                      ((pages[expandedPdfOcrIdx] as any).lines[i]?.corrected || lineCorrections[i])
+                                        ? (
+                                          <span className="text-emerald-400">{lineCorrections[i]}</span>
+                                        ) : (
+                                          <span className={isDark ? 'text-slate-200' : 'text-gray-800'}>{line.text}</span>
+                                        )
+                                    }
+                                  </td>
+                                  <td className={`py-2 px-4 flex items-center gap-2`}>
+                                    {spellEnabled && !lineCorrections[i] && (
+                                      <button
+                                        onClick={() => runLinePreview(i, line.text)}
+                                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium cursor-pointer transition-all ${isDark ? 'bg-violet-500/10 text-violet-400 hover:bg-violet-500/20' : 'bg-violet-50 text-violet-600 hover:bg-violet-100'}`}
+                                      >
+                                        ✍ Correct
+                                      </button>
+                                    )}
+                                    {lineCorrections[i] && (
+                                      <span className={`text-xs px-1.5 py-0.5 rounded ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`} data-line={i}>Fixed</span>
+                                    )}
                                     <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${confBg(line.confidence)}`}>
                                       {Math.round(line.confidence * 100)}%
                                     </span>
@@ -848,6 +909,9 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                 <span className={isDark ? 'text-slate-400' : 'text-gray-600'}>To:</span>
                 <input type="number" min={1} value={pageRange.to || ''} onChange={(e) => setPageRange((p) => ({ ...p, to: e.target.value }))} placeholder="All" className={`w-20 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
                 <span className={`text-xs ${isDark ? 'text-slate-600' : 'text-gray-400'}`}>Leave blank for all pages</span>
+                {pdfTotalPages! > 0 && pageRange.to && pageRange.from && (
+                  <span className={`text-xs font-medium ${isDark ? 'text-violet-400' : 'text-violet-600'}`}>{totalPagesRange} pages selected</span>
+                )}
               </div>
             </div>
           )}
@@ -855,10 +919,129 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
           {/* OCR options — Single merged panel */}
           {tab === 'ocr' && (
             <div className="space-y-3">
-              <div
-                className="glass-card rounded-2xl p-5"
-                style={{ animation: 'float-up 0.4s ease-out both' }}
-              >
+              {/* ── Spell Check Panel ─────────────────────── */}
+              <div className="glass-card rounded-2xl p-5" style={{ animation: 'float-up 0.4s ease-out both' }}>
+                <button
+                  onClick={() => setSpellOpen(!spellOpen)}
+                  className="w-full flex items-center justify-between mb-1"
+                >
+                  <span className={`text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>Spell Check</span>
+                  <div className="flex items-center gap-2">
+                    {spellEnabled && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium capitalize">{spellMode}</span>
+                    )}
+                    {spellOpen ? <ChevronUp className="h-3.5 w-3.5 text-slate-500" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-500" />}
+                  </div>
+                </button>
+
+                {spellOpen && (
+                  <div className="mt-4 pt-4 border-t border-slate-700/50 space-y-4" style={{ animation: 'float-up 0.2s ease-out both' }}>
+                    {/* Enable toggle */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className={`text-sm ${isDark ? 'text-slate-300' : 'text-gray-700'}`} htmlFor="spell-toggle">Enable Auto-Correction</label>
+                        <p className="text-xs text-slate-500 mt-0.5">Correct OCR output using dictionary + n-gram scoring</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input id="spell-toggle" type="checkbox" checked={spellEnabled} onChange={() => setSpellEnabled(!spellEnabled)} className="sr-only peer" />
+                        <span className={`w-10 h-5 rounded-full transition-all peer-focus:ring-4 peer-focus:ring-emerald-500/20 ${spellEnabled ? 'bg-emerald-500' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`} />
+                        <span className={`absolute top-[2px] left-[2px] w-4 h-4 rounded-full bg-white shadow transition-transform ${spellEnabled ? 'translate-x-5' : ''}`} />
+                      </label>
+                    </div>
+
+                    {spellEnabled && (
+                      <>
+                        {/* Correction mode */}
+                        <div>
+                          <label className={`block mb-1.5 text-[11px] font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>Correction Mode</label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {([
+                              { value: 'char', label: 'Character Map' },
+                              { value: 'distance', label: 'Dictionary (Levenshtein)' },
+                              { value: 'hybrid', label: 'Hybrid (Best Quality)' },
+                            ] as const).map(mode => (
+                              <button
+                                key={mode.value}
+                                onClick={() => setSpellMode(mode.value)}
+                                className={`px-3 py-2 rounded-lg text-xs font-medium transition-all border ${
+                                  spellMode === mode.value
+                                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                    : isDark ? 'bg-white/[0.02] text-slate-400 border-slate-700/30 hover:border-slate-600' : 'bg-gray-100 text-gray-600 border-gray-200 hover:border-gray-300'
+                                }`}
+                              >
+                                {mode.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Max Edit Distance */}
+                        <div>
+                          <label className={`block mb-1.5 text-[11px] font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
+                            Max Edit Distance
+                            <span title="How different a misspelled word can be from a valid word. Higher = more corrections but slower." className="inline-block">
+                              <Info className="inline h-3 w-3 ml-1 cursor-help text-slate-500" />
+                            </span>
+                          </label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="range"
+                              min={1}
+                              max={4}
+                              step={1}
+                              value={spellMaxDist}
+                              onChange={(e) => setSpellMaxDist(Number(e.target.value))}
+                              className="flex-1 accent-emerald-500"
+                            />
+                            <span className={`text-sm font-mono w-6 text-center ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{spellMaxDist}</span>
+                          </div>
+                        </div>
+
+                        {/* Use Word Frequency */}
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className={`text-sm ${isDark ? 'text-slate-300' : 'text-gray-700'}`} htmlFor="spell-freq">Use Word Frequency</label>
+                            <p className="text-xs text-slate-500 mt-0.5">Weight corrections by UrduHack frequency data</p>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input id="spell-freq" type="checkbox" checked={spellWordFreq} onChange={() => setSpellWordFreq(!spellWordFreq)} className="sr-only peer" />
+                            <span className={`w-10 h-5 rounded-full transition-all peer-focus:ring-4 peer-focus:ring-emerald-500/20 ${spellWordFreq ? 'bg-emerald-500' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`} />
+                            <span className={`absolute top-[2px] left-[2px] w-4 h-4 rounded-full bg-white shadow transition-transform ${spellWordFreq ? 'translate-x-5' : ''}`} />
+                          </label>
+                        </div>
+
+                        {/* Spell Preview */}
+                        <div className="space-y-2">
+                          <label className={`block mb-1.5 text-[11px] font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>Spell Check Preview</label>
+                          <textarea
+                            rows={2}
+                            placeholder="Type or paste text to preview corrections..."
+                            onChange={(e) => {
+                              if (e.target.value.trim()) runLinePreview(-1, e.target.value);
+                            }}
+                            className={`w-full border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-900/60 border-slate-700/50 text-white placeholder:text-slate-600' : 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400'} focus:border-violet-500 outline-none transition-all`}
+                          />
+                          {previewCorrections.length > 0 && (
+                            <div className="space-y-1">
+                              <span className={`text-xs font-medium ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{previewCorrections.length} correction(s):</span>
+                              {previewCorrections.map((c, i) => (
+                                <div key={i} className={`flex items-center gap-2 text-xs ${isDark ? 'bg-white/[0.02]' : 'bg-gray-50'} rounded px-2 py-1`} >
+                                  <span className="line-through text-red-400">{c.from}</span>
+                                  <span className={isDark ? 'text-slate-600' : 'text-gray-400'}>→</span>
+                                  <span className="text-emerald-400 font-medium">{c.to}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ── OCR Settings Panel ─────────────────────── */}
+              <div className="glass-card rounded-2xl p-5" style={{ animation: 'float-up 0.4s ease-out both' }}>
                 {/* Header row with title and collapse toggle */}
                 <div className="flex items-center justify-between mb-4">
                   <span className={`text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
@@ -1028,10 +1211,10 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                 )}
               </div>
             </div>
-          )}
+        )}
 
-          {/* Action buttons */}
-          <div className="flex flex-col gap-4">
+        {/* Action buttons */}
+        <div className="flex flex-col gap-4">
             <div className="flex items-center gap-3 flex-wrap">
               <button
                 onClick={() => {

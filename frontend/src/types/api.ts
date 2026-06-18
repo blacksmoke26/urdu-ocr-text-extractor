@@ -62,6 +62,10 @@ export interface SingleOcrParams {
   conf_threshold?: number;
   img_size?: number;
   text_cleaning?: boolean | string;
+  autocorrect?: boolean;
+  autocorrect_mode?: 'char' | 'distance' | 'hybrid';
+  spell_check_max_distance?: number;
+  spell_check_use_word_freq?: boolean;
 }
 
 /** Advanced OCR options for PDF and image OCR endpoints. */
@@ -74,6 +78,40 @@ export interface PdfOcrOptions extends SingleOcrParams {
   layout_analysis?: boolean;
   post_processing?: string;
   preprocess_options?: EnhanceOptions;
+}
+
+/** Urdu spell-check correction info returned by the API. */
+export interface SpellCorrection {
+  from: string;
+  to: string;
+  pos: number;
+  reason?: string;
+}
+
+/** Response shape for the /spell/check endpoint. */
+export interface SpellCheckResponse {
+  original: string;
+  corrected: string;
+  corrections_applied: number;
+  mode: 'char' | 'distance' | 'hybrid';
+  characters_corrected: SpellCorrection[];
+  words_corrected: SpellCorrection[];
+}
+
+/** Dictionary stats from /spell/info. */
+export interface SpellInfoResponse {
+  spell_checker: {
+    enabled: boolean;
+    mode: string;
+    max_distance: number;
+    use_word_freq: boolean;
+  };
+  dictionary: {
+    words_count: number;
+    bigrams_count: number;
+    trigrams_count: number;
+    total_unique_tokens: number;
+  };
 }
 
 /** Parameters for batch OCR uploads. */
@@ -236,6 +274,10 @@ export interface ServerConfig {
     rate_limiting_enabled: boolean;
     authentication_enabled: boolean;
     text_cleaning_enabled: boolean;
+    autocorrect_enabled: boolean;
+    autocorrect_mode: string;
+    spell_check_max_distance: number;
+    spell_check_use_word_freq: boolean;
   };
 }
 

@@ -28,9 +28,10 @@ export function PdfViewerModal({ file, open, onOpenChange, dark }: PdfViewerModa
   useEffect(() => {
     if (file && open) {
       const url = URL.createObjectURL(file);
-      setBlobUrl(url);
+      setBlobUrl(url); // eslint-disable-line react-hooks/exhaustive-deps
       return () => URL.revokeObjectURL(url);
     }
+    setBlobUrl('');
   }, [file, open]);
 
   const handleClose = () => {
