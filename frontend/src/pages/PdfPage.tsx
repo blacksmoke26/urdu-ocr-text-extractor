@@ -22,6 +22,7 @@ import {
   Image as ImageIcon,
   LayoutGrid,
   Maximize2,
+  PenLine,
   Scissors,
   Search,
   SlidersHorizontal,
@@ -34,6 +35,8 @@ import {
   BookText,
 } from 'lucide-react';
 import {Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle} from '#/components/ui/Dialog';
+import {Button} from '#/components/ui/Button';
+import {Badge} from '#/components/ui/Badge';
 import {SelectAdvanced} from '#/components/ui/SelectAdvanced';
 import {PdfViewerModal} from '#/components/ui/PdfViewerModal';
 import {useToast} from '#/context/ToastContext';
@@ -652,8 +655,8 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
 
         {/* ── Expanded Dialog for PDF OCR page ─── */}
         {expandedPdfOcrIdx !== null && pages[expandedPdfOcrIdx] && (
-          <Dialog open={expandedPdfOcrIdx !== null} onOpenChange={(open) => !open && setExpandedPdfOcrIdx(null)}>
-            <DialogContent size="xl" className={`max-w-4xl ${isDark ? '' : 'bg-white'}`} >
+          <Dialog open={expandedPdfOcrIdx! !== null} onOpenChange={(open) => !open && setExpandedPdfOcrIdx(null)}>
+            <DialogContent size="xl" className={`max-w-6xl ${isDark ? '' : 'bg-white'}`} >
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   {pages[expandedPdfOcrIdx]?.status === 'success' || pages[expandedPdfOcrIdx]?.status === 'done' ? (
@@ -665,7 +668,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                 </DialogTitle>
               </DialogHeader>
 
-              <DialogBody className="max-h-[70vh]">
+              <DialogBody className="max-h-[85vh]">
                 {(pages[expandedPdfOcrIdx]?.status === 'success' || pages[expandedPdfOcrIdx]?.status === 'done') ? (
                   <div className="space-y-6">
                     {/* Image + Text side by side */}
@@ -704,7 +707,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                             Copy
                           </button>
                         </div>
-                        <div className={`rounded-xl px-4 py-3 border leading-loose max-h-[300px] overflow-y-auto ${isDark ? 'bg-white/[0.02] border-slate-700/60' : 'bg-gray-50 border-gray-200'}`}>
+                        <div className={`rounded-xl px-4 py-3 border leading-loose max-h-[400px] h-[400px] overflow-y-auto ${isDark ? 'bg-white/[0.02] border-slate-700/60' : 'bg-gray-50 border-gray-200'}`}>
                           <p className="rtl urdu-font text-right leading-relaxed text-base" dir="rtl" style={{lineHeight:'2.4', color: isDark ? '#e2e8f0' : '#0f172a'}}>
                             {pages[expandedPdfOcrIdx]?.full_text || (
                               <span className={`${isDark ? 'text-slate-600' : 'text-gray-400'} italic`}></span>
@@ -724,19 +727,19 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                           </span>
                         </h4>
                         <div className={`rounded-xl border max-h-[300px] overflow-y-auto ${isDark ? 'border-slate-700/40' : 'border-gray-200'}`}>
-                          <table className="w-full text-sm">
+                          <table className="w-full text-sm border-collapse">
                             <thead className="sticky top-0 z-10">
-                              <tr className={isDark ? 'bg-white/[0.03]' : 'bg-gray-50'}>
-                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>#</th>
-                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Text (Urdu)</th>
-                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Confidence</th>
+                              <tr className={isDark ? 'bg-[#0f1320]/95 backdrop-blur-sm' : 'bg-gray-50'}>
+                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400 border-b border-slate-700/40' : 'text-gray-500 border-b border-gray-200'}`}>#</th>
+                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400 border-b border-slate-700/40' : 'text-gray-500 border-b border-gray-200'}`}>Text (Urdu)</th>
+                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400 border-b border-slate-700/40' : 'text-gray-500 border-b border-gray-200'}`}>Confidence</th>
                               </tr>
                             </thead>
                             <tbody>
                               {(pages[expandedPdfOcrIdx] as any).lines.map((line: any, i: number) => (
                                 <tr key={i} className={`border-t transition-colors ${isDark ? 'border-slate-800/50 hover:bg-white/[0.02]' : 'border-gray-100 hover:bg-gray-50'}`}>
-                                  <td className={`py-2 px-4 font-mono text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{i + 1}</td>
-                                  <td className={`py-2 px-4 rtl urdu-font text-right`} dir="rtl">
+                                  <td className={`py-2 px-4 font-mono text-xs align-top ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{i + 1}</td>
+                                  <td className={`py-2 px-4 rtl urdu-font text-right whitespace-pre-wrap break-words max-w-prose`} dir="rtl">
                                     {
                                       // Show corrected text if available, otherwise raw line.text
                                       ((pages[expandedPdfOcrIdx] as any).lines[i]?.corrected || lineCorrections[i])
@@ -747,21 +750,21 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                                         )
                                     }
                                   </td>
-                                  <td className={`py-2 px-4 flex items-center gap-2`}>
-                                    {spellEnabled && !lineCorrections[i] && (
-                                      <button
+                                  <td className={`py-2 px-4 align-top`}>
+                                    <div className="flex items-center gap-1.5">{spellEnabled && !lineCorrections[i] && (
+                                      <Button
+                                        variant="ghost"
                                         onClick={() => runLinePreview(i, line.text)}
-                                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium cursor-pointer transition-all ${isDark ? 'bg-violet-500/10 text-violet-400 hover:bg-violet-500/20' : 'bg-violet-50 text-violet-600 hover:bg-violet-100'}`}
+                                        className={`h-6 px-2 text-xs ${isDark ? 'hover:bg-violet-500/10 text-violet-400' : 'hover:bg-violet-50 text-violet-600'} leading-none`}
                                       >
-                                        ✍ Correct
-                                      </button>
+                                        <PenLine className="h-3 w-3 shrink-0" />
+                                        Correct
+                                      </Button>
+                                    )}{lineCorrections[i] && (
+                                      <Badge variant="success" label="Fixed" />
                                     )}
-                                    {lineCorrections[i] && (
-                                      <span className={`text-xs px-1.5 py-0.5 rounded ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`} data-line={i}>Fixed</span>
-                                    )}
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${confBg(line.confidence)}`}>
-                                      {Math.round(line.confidence * 100)}%
-                                    </span>
+                                    <Badge variant={confBg(line.confidence).includes('emerald') ? 'success' : confBg(line.confidence).includes('amber') ? 'warning' : 'error'} label={`${Math.round(line.confidence * 100)}%`} />
+                                    </div>
                                   </td>
                                 </tr>
                               ))}

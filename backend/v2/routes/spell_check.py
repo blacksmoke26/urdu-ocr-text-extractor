@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import os
-from fastapi import APIRouter
+from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 spell_router = APIRouter(prefix="/api/v2", tags=["Spell Check"])
+
+
+class SpellCheckRequest(BaseModel):
+    """Request body for spell check endpoint."""
+    text: str = Field(..., description="Urdu text to correct")
+    mode: str = Field("hybrid", description='Correction mode: char, distance, or hybrid')
 
 
 @spell_router.post(
@@ -14,13 +21,14 @@ spell_router = APIRouter(prefix="/api/v2", tags=["Spell Check"])
     summary="Spell check Urdu text",
     description="Check and auto-correct Urdu text using the spell checker engine.",
 )
-async def spell_check_endpoint(text: str, mode: str = "hybrid"):
+async def spell_check_endpoint(request: SpellCheckRequest = Body(default_factory=SpellCheckRequest)):
     """Standalone spell check endpoint.
 
     Args:
-        text: Urdu text to correct.
-        mode: "char" | "distance" | "hybrid" (default: hybrid).
+        request: Spell check request with text and mode.
     """
+    text = request.text
+    mode = request.mode
     if mode not in ("char", "distance", "hybrid"):
         return JSONResponse(
             status_code=400,

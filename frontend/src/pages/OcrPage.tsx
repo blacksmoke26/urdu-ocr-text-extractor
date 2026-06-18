@@ -43,6 +43,7 @@ import {ocrBatch, ocrEnhanced, ocrSingle} from '#/utils/api/ocr';
 import {spellCheck} from '#/utils/api/spell';
 import type {BatchOcrResponse, ConfidenceStats, OcrLine, OcrResult, SpellCorrection} from '#/types/api';
 import {useToast} from '#/context/ToastContext';
+import {Badge} from '#/components/ui/Badge';
 import {formatBytes, isImageFile} from '#/utils/file';
 import {Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle} from '#/components/ui/Dialog';
 
@@ -1056,7 +1057,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
           {/* ── Expanded Modal for Active Tab ───── */}
           {expandedCardIdx !== null && results[expandedCardIdx] && (
             <Dialog open={expandedCardIdx !== null} onOpenChange={(open) => !open && setExpandedCardIdx(null)}>
-              <DialogContent size="xl" className="max-w-4xl">
+              <DialogContent size="xl" className="max-w-6xl">
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     {results[expandedCardIdx]?.status === 'success' ? (
@@ -1068,7 +1069,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
                   </DialogTitle>
                 </DialogHeader>
 
-                <DialogBody className="max-h-[70vh]">
+                <DialogBody className="max-h-[85vh]">
                   {results[expandedCardIdx]?.status === 'success' ? (
                     <div className="space-y-6">
                       {/* Image + Text side by side */}
@@ -1105,7 +1106,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
                               Copy
                             </button>
                           </div>
-                          <div className="rounded-xl px-4 py-3 border leading-loose bg-slate-800/50 border-slate-700/60 max-h-[300px] overflow-y-auto">
+                          <div className="rounded-xl px-4 py-3 border leading-loose bg-slate-800/50 border-slate-700/60 max-h-[400px] h-[400px] overflow-y-auto">
                             <p className="rtl urdu-font text-right leading-relaxed text-base" dir="rtl" style={{lineHeight:'2.4', color:'#e2e8f0'}}>
                               {(() => {
                                 const raw = results[expandedCardIdx]?.full_text || 'No text detected.';
@@ -1144,23 +1145,23 @@ export function OcrPage({ onResult }: OcrPageProps) {
                             </span>
                           </h4>
                           <div className="rounded-xl border border-slate-700/40 max-h-[300px] overflow-y-auto">
-                            <table className="w-full text-sm">
+                            <table className="w-full text-sm border-collapse">
                               <thead className="sticky top-0 z-10">
-                                <tr className="bg-white/[0.03]">
-                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">#</th>
-                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">Text (Urdu)</th>
-                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">Confidence</th>
+                                <tr className="bg-[#0f1320]/95 backdrop-blur-sm">
+                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400 border-b border-slate-700/40">#</th>
+                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400 border-b border-slate-700/40">Text (Urdu)</th>
+                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400 border-b border-slate-700/40">Confidence</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {(results[expandedCardIdx] as any).lines.map((line: OcrLine, i: number) => (
                                   <tr key={i} className="border-t border-slate-800/50 hover:bg-white/[0.02] transition-colors">
-                                    <td className="py-2 px-4 font-mono text-xs text-slate-500">{i + 1}</td>
-                                    <td className="py-2 px-4 rtl urdu-font text-right" dir="rtl"><span className="text-slate-200" style={{lineHeight:'2'}}>{line.text}</span></td>
+                                    <td className="py-2 px-4 font-mono text-xs align-top text-slate-500">{i + 1}</td>
+                                    <td className="py-2 px-4 rtl urdu-font text-right whitespace-pre-wrap break-words max-w-prose" dir="rtl"><span className="text-slate-200" style={{lineHeight:'2'}}>{line.text}</span></td>
                                     <td className="py-2 px-4">
-                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${confidenceBg(line.confidence)}`}>
-                                        {Math.round(line.confidence * 100)}%
-                                      </span>
+                                      <div className="flex items-center mt-2">
+                                        <Badge variant={confidenceBg(line.confidence).includes('emerald') ? 'success' : confidenceBg(line.confidence).includes('amber') ? 'warning' : 'error'} label={`${Math.round(line.confidence * 100)}%`} />
+                                      </div>
                                     </td>
                                   </tr>
                                 ))}
