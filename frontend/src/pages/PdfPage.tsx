@@ -11,16 +11,34 @@
  * Each tab uses the appropriate v2 API endpoint via axios.
  */
 
-import { useRef, useState } from 'react';
-import { Clock, FileText, Scissors, Search, Square, Timer, UploadCloud, Eye, FileJson, ChevronDown, ChevronUp, SlidersHorizontal, Cpu, Zap, EyeOff, LayoutGrid, Wand2, Sparkles, Image as ImageIcon } from 'lucide-react';
-import { cancelPdfOcr, pdfExtract, pdfInfo, pdfOcr } from '#/utils/api/pdf';
-import { Dialog, DialogBody, DialogContent } from '#/components/ui/Dialog';
-import { SelectAdvanced } from '#/components/ui/SelectAdvanced';
-import { useToast } from '#/context/ToastContext';
-import { formatBytes } from '#/utils/file';
+import {useRef, useState} from 'react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  FileText,
+  Image as ImageIcon,
+  LayoutGrid,
+  Maximize2,
+  Scissors,
+  Search,
+  SlidersHorizontal,
+  Sparkles,
+  Square,
+  Type,
+  UploadCloud,
+  Wand2,
+} from 'lucide-react';
+import {Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle} from '#/components/ui/Dialog';
+import {SelectAdvanced} from '#/components/ui/SelectAdvanced';
+import {PdfViewerModal} from '#/components/ui/PdfViewerModal';
+import {useToast} from '#/context/ToastContext';
+import {useTheme} from '#/context/ThemeContext';
+import {formatBytes} from '#/utils/file';
+import {cancelPdfOcr, pdfExtract, pdfInfo, pdfOcr} from '#/utils/api/pdf';
 import type {PdfExtractResponse, PdfInfo, PdfOcrPageResult, PdfOcrResponse} from '#/types/api';
-import { PdfViewerModal } from '#/components/ui/PdfViewerModal';
-import { useTheme } from '#/context/ThemeContext';
 
 type PdfTab = 'preview' | 'info' | 'extract' | 'ocr';
 
@@ -55,6 +73,9 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
   // Image viewer state (extract tab thumbnails)
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerPage, setViewerPage] = useState<{ page_number: number; image_b64: string } | null>(null);
+
+  // PDF OCR horizontal card state
+  const [expandedPdfOcrIdx, setExpandedPdfOcrIdx] = useState<number | null>(null);
 
   // react-pdf modal viewer state
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
@@ -465,24 +486,267 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
 
   const renderPdfOcr = (data: any) => {
     const pages = data.pages ?? [];
+
+    // Helper: confidence color helpers (inline, matching OcrPage)
+    const confColor = (c: number) => c >= 0.7 ? 'text-emerald-400' : c >= 0.4 ? 'text-amber-400' : 'text-red-400';
+    const confBg = (c: number) => c >= 0.7 ? (isDark ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-100 text-emerald-700') : c >= 0.4 ? (isDark ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-700') : (isDark ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700');
+
     return (
-      <div className="space-y-4">
+      <>
         <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>{data.total_pages} pages · {data.total_text_lines} lines</p>
-        {pages.map((pg: PdfOcrPageResult, i: number) => {
-          const confMean = pg.confidence_stats?.mean ?? 0;
-          return (
-            <div key={i} className="glass-card rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Page {pg.page_number}</h4>
-                <span className={`text-xs px-2 py-0.5 rounded-md font-medium ${confMean >= 0.7 ? 'bg-emerald-500/10 text-emerald-400' : confMean >= 0.4 ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>{Math.round(confMean * 100)}% confidence · {pg.detected_lines} lines</span>
+
+        {/* ── Horizontal Result Cards ──────────── */}
+        <div className="flex items-stretch gap-4 overflow-x-auto pb-4">
+          {pages.map((pg: PdfOcrPageResult, idx: number) => {
+            const isSuccess = pg.status === 'success';
+            const isExpanded = expandedPdfOcrIdx === idx;
+            const confMean = pg.confidence_stats?.mean ?? 0;
+            const previewText = (pg.full_text || '').slice(0, 120);
+            const linesCount = (pg as any)?.lines?.length ?? pg.detected_lines ?? 0;
+
+            return (
+              <div key={idx} className={`min-w-[340px] max-w-[380px] flex-1 rounded-xl border transition-all duration-200 ${isDark ? 'bg-white/[0.02] border-slate-700/50' : 'bg-gray-50 border-gray-200'} ${isExpanded ? (isDark ? 'ring-2 ring-violet-500/40 border-violet-500/30' : 'ring-2 ring-violet-400/40') : ''}`}>
+                {/* Card header: image thumbnail + status */}
+                <div className="flex items-start gap-3 mb-3 p-4 pb-0">
+                  {/* Thumbnail image — clickable to expand */}
+                  <button
+                    onClick={() => setExpandedPdfOcrIdx(isExpanded ? null : idx)}
+                    className={`relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border ${isDark ? 'border-slate-700/50 bg-white/[0.02]' : 'border-gray-200 bg-gray-100'} hover:border-violet-500/40 transition-colors group cursor-pointer`}
+                  >
+                    {/* Use annotated image if available, otherwise page thumbnail */}
+                    {(pg as any).annotated_image_b64 ? (
+                      <img
+                        src={`data:image/png;base64,${(pg as any).annotated_image_b64}`}
+                        alt={`Page ${pg.page_number} thumb`}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                        style={{ imageRendering: 'auto' }}
+                      />
+                    ) : (pg as any).thumb_image_b64 ? (
+                      <img
+                        src={`data:image/png;base64,${(pg as any).thumb_image_b64}`}
+                        alt={`Page ${pg.page_number} thumb`}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                      />
+                    ) : null}
+                    {/* Hover overlay */}
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Maximize2 className="h-4 w-4 text-white" />
+                    </div>
+                  </button>
+
+                  {/* File info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      {isSuccess ? (
+                        <CheckCircle2 className={`h-3.5 w-3.5 text-emerald-400 shrink-0`} />
+                      ) : (
+                        <AlertTriangle className={`h-3.5 w-3.5 text-red-400 shrink-0`} />
+                      )}
+                      <p className={`text-xs font-medium truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>Page {pg.page_number}</p>
+                    </div>
+
+                    {/* Confidence */}
+                    {isSuccess && (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${confBg(confMean)}`}>
+                        {Math.round(confMean * 100)}% confidence
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Text preview */}
+                <div className="space-y-2 px-4">
+                  <div className={`flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-medium ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
+                    <Type className="h-3 w-3" />
+                    Text Preview
+                  </div>
+                  <div className={`rounded-lg px-3 py-2.5 border max-h-[160px] overflow-y-auto ${isDark ? 'bg-white/[0.02] border-slate-700/40' : 'bg-gray-100 border-gray-200'}`}>
+                    {isSuccess ? (
+                      <p className="rtl font-urdu text-right leading-relaxed text-sm " dir="rtl">
+                        {previewText || (
+                          <span className={`${isDark ? 'text-slate-600' : 'text-gray-400'} italic`}></span>
+                        )}
+                        {(pg.full_text || '').length > 120 && (
+                          <span className={isDark ? 'text-slate-500' : 'text-gray-400'}>...</span>
+                        )}
+                      </p>
+                    ) : (
+                      <p className={`text-xs ${isDark ? 'text-red-400' : 'text-red-500'}`}>
+                        {(pg as any)?.message || 'Processing failed.'}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Meta */}
+                  <div className={`flex items-center gap-3 text-[10px] ${isDark ? 'text-slate-500' : 'text-gray-400'} pt-1`}>
+                    {isSuccess && (
+                      <>
+                        <span>{linesCount} lines</span>
+                        <span>·</span>
+                        <span>~{Math.round(pg.processing_time_ms ?? 0)}ms</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Expand button */}
+                {isSuccess && (
+                  <div className="flex justify-center px-4 pb-3 mt-3">
+                    <button
+                      onClick={() => setExpandedPdfOcrIdx(isExpanded ? null : idx)}
+                      className={`inline-flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+                      isExpanded
+                        ? (isDark ? 'bg-violet-500/15 text-violet-400 border-violet-500/20' : 'bg-violet-50 text-violet-600 border-violet-200')
+                        : (isDark ? 'bg-white/[0.03] hover:bg-violet-500/15 hover:text-violet-400 text-slate-400 border-slate-700/30' : 'bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-200')
+                    }`}
+                  >
+                      {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      {isExpanded ? 'Collapse' : 'Expand'} Details
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className={`rounded-xl px-4 py-3 border leading-loose ${isDark ? 'bg-white/[0.02] border-slate-700/60' : 'bg-gray-50 border-gray-200'}`}>
-                <span className={`rtl text-right ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>{pg.full_text || <span className={`${isDark ? 'text-slate-600' : 'text-gray-400'} italic`}>No text.</span>}</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+
+        {/* ── Expanded Dialog for PDF OCR page ─── */}
+        {expandedPdfOcrIdx !== null && pages[expandedPdfOcrIdx] && (
+          <Dialog open={expandedPdfOcrIdx !== null} onOpenChange={(open) => !open && setExpandedPdfOcrIdx(null)}>
+            <DialogContent size="xl" className={`max-w-4xl ${isDark ? '' : 'bg-white'}`} >
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  {pages[expandedPdfOcrIdx]?.status === 'success' || pages[expandedPdfOcrIdx]?.status === 'done' ? (
+                    <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                  ) : (
+                    <AlertTriangle className="h-5 w-5 text-red-400" />
+                  )}
+                  Page {pages[expandedPdfOcrIdx]?.page_number}
+                </DialogTitle>
+              </DialogHeader>
+
+              <DialogBody className="max-h-[70vh]">
+                {(pages[expandedPdfOcrIdx]?.status === 'success' || pages[expandedPdfOcrIdx]?.status === 'done') ? (
+                  <div className="space-y-6">
+                    {/* Image + Text side by side */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {(pages[expandedPdfOcrIdx] as any).annotated_image_b64 && (
+                        <div>
+                          <h4 className={`text-sm font-semibold mb-3 flex items-center gap-1.5 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            <ImageIcon className="h-4 w-4" />
+                            Detected Lines
+                          </h4>
+                          <div className={`rounded-xl overflow-hidden border ${isDark ? 'border-slate-700/50 bg-black/20' : 'border-gray-200 bg-gray-50'}`}>
+                            <img
+                              src={`data:image/png;base64,${(pages[expandedPdfOcrIdx] as any).annotated_image_b64}`}
+                              alt="Annotated"
+                              className="w-full object-contain max-h-[400px]"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Extracted text */}
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className={`text-sm font-semibold flex items-center gap-1.5 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            <Type className="h-4 w-4" />
+                            Extracted Text
+                          </h4>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(pages[expandedPdfOcrIdx]?.full_text ?? '');
+                              addToast('Text copied to clipboard.', 'success');
+                            }}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${isDark ? 'bg-white/5 hover:bg-white/10 text-slate-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}
+                          >
+                            <Eye className="h-3 w-3" />
+                            Copy
+                          </button>
+                        </div>
+                        <div className={`rounded-xl px-4 py-3 border leading-loose max-h-[300px] overflow-y-auto ${isDark ? 'bg-white/[0.02] border-slate-700/60' : 'bg-gray-50 border-gray-200'}`}>
+                          <p className="rtl text-right leading-relaxed text-base " dir="rtl">
+                            {pages[expandedPdfOcrIdx]?.full_text || (
+                              <span className={`${isDark ? 'text-slate-600' : 'text-gray-400'} italic`}></span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Per-line results */}
+                    {(pages[expandedPdfOcrIdx] as any)?.lines?.length > 0 && (
+                      <div>
+                        <h4 className={`text-sm font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                          Per-Line Results{' '}
+                          <span className={`font-normal text-sm ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
+                            ({(pages[expandedPdfOcrIdx] as any).lines.length})
+                          </span>
+                        </h4>
+                        <div className={`rounded-xl border max-h-[300px] overflow-y-auto ${isDark ? 'border-slate-700/40' : 'border-gray-200'}`}>
+                          <table className="w-full text-sm">
+                            <thead className="sticky top-0 z-10">
+                              <tr className={isDark ? 'bg-white/[0.03]' : 'bg-gray-50'}>
+                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>#</th>
+                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Text (Urdu)</th>
+                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>Confidence</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(pages[expandedPdfOcrIdx] as any).lines.map((line: any, i: number) => (
+                                <tr key={i} className={`border-t transition-colors ${isDark ? 'border-slate-800/50 hover:bg-white/[0.02]' : 'border-gray-100 hover:bg-gray-50'}`}>
+                                  <td className={`py-2 px-4 font-mono text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{i + 1}</td>
+                                  <td className={`py-2 px-4 rtl text-right`} dir="rtl"><span className={isDark ? 'text-slate-200' : 'text-gray-800'}>{line.text}</span></td>
+                                  <td className={`py-2 px-4`}>
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${confBg(line.confidence)}`}>
+                                      {Math.round(line.confidence * 100)}%
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Confidence stats */}
+                    <div>
+                      <h4 className={`text-sm font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>Confidence Statistics</h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {(
+                          [
+                            { label: 'Mean', value: pages[expandedPdfOcrIdx]?.confidence_stats?.mean ?? 0 },
+                            { label: 'Median', value: pages[expandedPdfOcrIdx]?.confidence_stats?.median ?? 0 },
+                            { label: 'Min', value: pages[expandedPdfOcrIdx]?.confidence_stats?.min ?? 0 },
+                            { label: 'Max', value: pages[expandedPdfOcrIdx]?.confidence_stats?.max ?? 0 },
+                          ] as Array<{label: string; value: number}>
+                        ).map(({ label, value }) => (
+                          <div key={label} className={`rounded-xl px-3 py-2.5 border ${isDark ? 'bg-white/[0.02] border-slate-700/40' : 'bg-gray-50 border-gray-200'}`}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className={isDark ? 'text-slate-400' : 'text-gray-500'}>{label}</span>
+                              <span className={`font-semibold ${confColor(value)}`}>{Math.round(value * 100)}%</span>
+                            </div>
+                            <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-800/80' : 'bg-gray-200'}`}>
+                              <div className={`h-full rounded-full bg-gradient-to-r ${value >= 0.7 ? 'from-emerald-400 to-green-500' : value >= 0.4 ? 'from-amber-400 to-yellow-500' : 'from-red-400 to-rose-500'} transition-all duration-700`} style={{ width: `${Math.round(value * 100)}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <AlertTriangle className={`h-10 w-10 mx-auto mb-3 ${isDark ? 'text-red-400' : 'text-red-500'}`} />
+                    <h3 className={`font-semibold mb-1 ${isDark ? 'text-red-400' : 'text-red-500'}`}>Processing Failed</h3>
+                    <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>{(pages[expandedPdfOcrIdx] as any)?.message || 'An unexpected error occurred.'}</p>
+                  </div>
+                )}
+              </DialogBody>
+            </DialogContent>
+          </Dialog>
+        )}
+      </>
     );
   };
 

@@ -9,11 +9,19 @@ import {
   Upload, FileImage, Copy, CheckCircle2, AlertTriangle, Loader2, Settings2, Sparkles, Image as ImageIcon,
   ClipboardPaste, Brain, BookOpen, Mic, Hash, Info, X, SlidersHorizontal, ChevronDown, ChevronUp,
   Grid3X3, Trash2, ZoomIn, RotateCw, Minus, Plus, Layers, Wand2, Sun, Moon, Eye, FileText,
+  Maximize2, Type,
 } from 'lucide-react';
 import { ocrSingle, ocrEnhanced, ocrBatch } from '#/utils/api/ocr';
 import type { OcrResult, OcrLine, ConfidenceStats, BatchOcrResponse } from '#/types/api';
 import { useToast } from '#/context/ToastContext';
 import { formatBytes, isImageFile } from '#/utils/file';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogBody,
+} from '#/components/ui/Dialog';
 
 const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/gif'];
 
@@ -184,6 +192,9 @@ export function OcrPage({ onResult }: OcrPageProps) {
   const [activeResultTab, setActiveResultTab] = useState(0);
   const [previewFilter, setPreviewFilter] = useState('none');
 
+  // Horizontal card / modal state
+  const [expandedCardIdx, setExpandedCardIdx] = useState<number | null>(null);
+
   const { addToast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const activeEnhanceOptions = computeEnhanceOptions(enhancements);
@@ -331,6 +342,9 @@ export function OcrPage({ onResult }: OcrPageProps) {
 
       const successCount = finalResults.filter(r => r.status === 'success').length;
       addToast(`${successCount}/${files.length} image${files.length > 1 ? 's' : ''} processed successfully.`, 'success');
+
+      // Ensure results are always set before showing (catch-all for single-image case)
+      setResults(finalResults);
 
     } catch (err: any) {
       addToast(err?.message || 'OCR failed.', 'error');
@@ -638,146 +652,257 @@ export function OcrPage({ onResult }: OcrPageProps) {
       {results.length > 0 && !loading && (
         <div className="space-y-6 animate-fade-in">
 
-          {/* Multi-image tabs */}
-          {results.length > 1 && (
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 animate-card-float stagger-1">
-              {results.map((result, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setActiveResultTab(idx)}
-                  className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                    activeResultTab === idx
-                      ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
-                      : result.status === 'error'
-                        ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                        : 'bg-white/[0.03] text-slate-400 hover:bg-white/[0.06] hover:text-slate-300 border border-slate-700/30'
-                  }`}
-                >
-                  {result.status === 'error' ? <AlertTriangle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3 text-emerald-400" />}
-                  {files[idx]?.name?.slice(0, 15)}{(files[idx]?.name?.length ?? 0) > 15 ? '…' : ''}
-                </button>
-              ))}
+          {/* Status bar for active tab */}
+          {results[activeResultTab]?.status === 'success' && (
+            <div className="inline-flex items-center gap-3 px-4 py-2 rounded-xl bg-white/[0.03] border border-slate-700/30 animate-card-float stagger-1">
+              <span className="text-xs text-slate-500">{results[activeResultTab]?.task_id}</span>
+              <span className="w-1 h-1 rounded-full bg-slate-700" />
+              <span className="text-xs text-slate-400">{results[activeResultTab]?.detected_lines} lines</span>
+              <span className="w-1 h-1 rounded-full bg-slate-700" />
+              <span className="text-xs font-medium text-slate-300">{Math.round(results[activeResultTab]?.processing_time_ms ?? 0)}ms</span>
             </div>
           )}
 
-          {/* Status bar */}
-          <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-xl animate-card-float stagger-1 ${results[activeResultTab]?.status === 'error' ? 'bg-red-500/5 border border-red-500/10' : 'bg-white/[0.03]'}`}>
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${
-              results[activeResultTab]?.status === 'success' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
-            }`}>
-              {results[activeResultTab]?.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
-              {results[activeResultTab]?.status?.toUpperCase()}
-            </span>
-            <span className="text-xs text-slate-500">{results[activeResultTab]?.task_id}</span>
-            <span className="w-1 h-1 rounded-full bg-slate-700" />
-            <span className="text-xs text-slate-400">{results[activeResultTab]?.detected_lines} lines</span>
-            <span className="w-1 h-1 rounded-full bg-slate-700" />
-            <span className="text-xs font-medium text-slate-300">{Math.round(results[activeResultTab]?.processing_time_ms ?? 0)}ms</span>
-          </div>
+          {/* ── Result Cards (Vertical Grid) ─────────── */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 animate-card-float stagger-2">
+            {results.map((result, idx) => {
+              const isSuccess = result.status === 'success';
+              const isExpanded = expandedCardIdx === idx;
+              // Short preview text (first ~120 chars)
+              const previewText = (result.full_text || '').slice(0, 120);
+              const linesCount = (result as any)?.lines?.length ?? 0;
+              const meanConf = result.confidence_stats?.mean ?? 0;
 
-          {/* AI Insights */}
-          {results[activeResultTab] && (results[activeResultTab] as any).ai_analysis && (
-            <button
-              onClick={() => setInsightsOpen(!insightsOpen)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer animate-card-float stagger-2 ${
-                insightsOpen ? 'bg-violet-500/15 text-violet-400 border border-violet-500/20' : 'bg-white/[0.03] text-slate-400 hover:text-slate-300 border border-slate-700/30'
-              }`}
-            >
-              <Brain className="h-3.5 w-3.5" />
-              AI Insights
-              {insightsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            </button>
-          )}
+              return (
+                <div key={idx} className={`rounded-xl bg-white/[0.02] border transition-all duration-200 ${
+                  activeResultTab === idx ? 'border-violet-500/30' : 'border-slate-700/50'
+                }`}>
+                  {/* Card header: image thumbnail + status */}
+                  <div className="flex items-start gap-3 p-4 pb-2">
+                    {/* Thumbnail image — clickable to expand */}
+                    <button
+                      onClick={() => setExpandedCardIdx(isExpanded ? null : idx)}
+                      className="relative shrink-0 w-[64px] h-[64px] rounded-lg overflow-hidden border border-slate-700/50 bg-black/20 hover:border-violet-500/50 transition-colors group cursor-pointer"
+                    >
+                      {/* Use annotated image if available, otherwise preview */}
+                      {(result as any).annotated_image_b64 ? (
+                        <img
+                          src={`data:image/png;base64,${(result as any).annotated_image_b64}`}
+                          alt="Thumbnail"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                          style={{ imageRendering: 'auto' }}
+                        />
+                      ) : previews[idx] ? (
+                        <img
+                          src={previews[idx]}
+                          alt="Thumbnail"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                        />
+                      ) : null}
+                      {/* Hover overlay */}
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Maximize2 className="h-4 w-4 text-white" />
+                      </div>
+                    </button>
 
-          {insightsOpen && results[activeResultTab] && (results[activeResultTab] as any).ai_analysis && (
-            <AiInsightsPanel result={results[activeResultTab]} />
-          )}
+                    {/* File info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        {isSuccess ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+                        )}
+                        <p className="text-xs font-medium text-white truncate">{result.filename ?? `Page ${idx + 1}`}</p>
+                      </div>
 
-          {/* Results cards */}
-          {results[activeResultTab]?.status === 'success' ? <>
-            {/* Annotated Image */}
-            {(results[activeResultTab] as any).annotated_image_b64 && (
-              <div className="glass-card rounded-2xl p-6 animate-card-float stagger-2">
-                <h3 className="font-semibold mb-4 text-white">Detected Lines</h3>
-                <div className="rounded-xl overflow-hidden border border-slate-700/50">
-                  <img src={`data:image/png;base64,${(results[activeResultTab] as any).annotated_image_b64}`} alt="Annotated" className="max-h-[500px] mx-auto w-full object-contain" />
-                </div>
-              </div>
-            )}
-
-            {/* Full Text */}
-            <div className="glass-card rounded-2xl p-6 animate-card-float stagger-3">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-white">Extracted Urdu Text</h3>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => copyToClipboard(results[activeResultTab]?.full_text ?? '')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 hover:bg-white/10 text-slate-300 transition-all cursor-pointer">
-                    <Copy className="h-3.5 w-3.5" /> Copy
-                  </button>
-                  <button onClick={() => downloadTxt(results[activeResultTab!])} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 hover:bg-white/10 text-slate-300 transition-all cursor-pointer">
-                    <FileText className="h-3.5 w-3.5" /> .txt
-                  </button>
-                </div>
-              </div>
-              <div className="rounded-xl px-5 py-4 border leading-loose text-base bg-white/[0.02] border-slate-700/60">
-                <p className="rtl text-right text-slate-200">
-                  {results[activeResultTab]?.full_text || <span className="text-slate-600 italic">No text detected.</span>}
-                </p>
-              </div>
-            </div>
-
-            {/* Per-line table */}
-            <div className="glass-card rounded-2xl p-6 animate-card-float stagger-4">
-              <h3 className="font-semibold mb-4 text-white">Per-Line Results <span className="font-normal text-sm text-slate-500">({(results[activeResultTab] as any)?.lines?.length ?? 0})</span></h3>
-              <div className="overflow-x-auto rounded-xl border border-slate-700/40 max-h-[500px] overflow-y-auto">
-                <table className="w-full text-sm sticky-header">
-                  <thead className="sticky top-0 z-10">
-                    <tr className="bg-white/[0.03]">
-                      <th className="py-3 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">#</th>
-                      <th className="py-3 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">Text (Urdu)</th>
-                      <th className="py-3 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">Confidence</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(results[activeResultTab] as any)?.lines?.map((line: OcrLine, i: number) => (
-                      <tr key={i} className="border-t border-slate-800/50 hover:bg-white/[0.02] transition-colors">
-                        <td className="py-3 px-4 font-mono text-xs text-slate-500">{i + 1}</td>
-                        <td className="py-3 px-4 rtl text-right" dir="rtl"><span className="text-slate-200">{line.text}</span></td>
-                        <td className="py-3 px-4">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${confidenceBg(line.confidence)}`}>
-                            {Math.round(line.confidence * 100)}%
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Confidence Stats */}
-            <div className="glass-card rounded-2xl p-6 animate-card-float stagger-5">
-              <h3 className="font-semibold mb-4 text-white">Confidence Statistics</h3>
-              <div className="space-y-3">
-                {statsBars(results[activeResultTab]?.confidence_stats ?? { mean: 0, min: 0, max: 0, median: 0 }).map(({ label, value, color }) => (
-                  <div key={label}>
-                    <div className="flex justify-between text-xs mb-1.5">
-                      <span className="font-medium text-slate-300">{label}</span>
-                      <span className={`font-semibold ${confidenceColor(value)}`}>{Math.round(value * 100)}%</span>
-                    </div>
-                    <div className="h-2.5 rounded-full overflow-hidden bg-slate-800/80">
-                      <div className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-700`} style={{ width: `${Math.round(value * 100)}%` }} />
+                      {/* Confidence */}
+                      {isSuccess && (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${confidenceBg(meanConf)}`}>
+                          {Math.round(meanConf * 100)}% confidence
+                        </span>
+                      )}
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </> : (
-            /* Error state */
-            <div className="glass-card rounded-2xl p-8 text-center animate-card-float">
-              <AlertTriangle className="h-10 w-10 mx-auto mb-3 text-red-400" />
-              <h3 className="font-semibold text-red-400 mb-1">Processing Failed</h3>
-              <p className="text-sm text-slate-400">{(results[activeResultTab] as any)?.message || 'An unexpected error occurred.'}</p>
-            </div>
+
+                  {/* Text preview */}
+                  <div className="px-4 space-y-2 pb-3">
+                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase tracking-wider font-medium">
+                      <Type className="h-3 w-3" />
+                      Text Preview
+                    </div>
+                    <div className="rounded-lg p-4 bg-white/[0.02] border border-slate-700/40">
+                      {isSuccess ? (
+                        <p className="rtl urdu-font text-right leading-relaxed text-sm text-slate-300" dir="rtl" style={{lineHeight:'2.2'}}>
+                          <span className="line-clamp-[5]">{previewText || (
+                            <span className="text-slate-600 italic">No text detected.</span>
+                          )}</span>
+                          {(result.full_text || '').length > 120 && (
+                            <span className="text-slate-500 ml-1">...</span>
+                          )}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-red-400">
+                          {(result as any)?.message || 'Processing failed.'}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Meta */}
+                    <div className="flex items-center gap-3 text-[10px] text-slate-500 pt-1 px-4 pb-2">
+                      {isSuccess && (
+                        <>
+                          <span>{linesCount} lines</span>
+                          <span>·</span>
+                          <span>{Math.round(result.processing_time_ms ?? 0)}ms</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expand button — narrower, centered */}
+                  {isSuccess && (
+                    <div className="flex justify-center px-4 pb-3">
+                      <button
+                        onClick={() => setExpandedCardIdx(isExpanded ? null : idx)}
+                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-white/[0.03] hover:bg-violet-500/15 hover:text-violet-400 text-slate-500 border border-slate-700/30 transition-all cursor-pointer"
+                      >
+                        {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        {isExpanded ? 'Collapse' : 'Expand'} Details
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── Expanded Modal for Active Tab ───── */}
+          {expandedCardIdx !== null && results[expandedCardIdx] && (
+            <Dialog open={expandedCardIdx !== null} onOpenChange={(open) => !open && setExpandedCardIdx(null)}>
+              <DialogContent size="xl" className="max-w-4xl">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    {results[expandedCardIdx]?.status === 'success' ? (
+                      <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                    ) : (
+                      <AlertTriangle className="h-5 w-5 text-red-400" />
+                    )}
+                    {results[expandedCardIdx]?.filename ?? `Page ${expandedCardIdx + 1}`}
+                  </DialogTitle>
+                </DialogHeader>
+
+                <DialogBody className="max-h-[70vh]">
+                  {results[expandedCardIdx]?.status === 'success' ? (
+                    <div className="space-y-6">
+                      {/* Image + Text side by side */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Full annotated image */}
+                        {(results[expandedCardIdx] as any).annotated_image_b64 && (
+                          <div>
+                            <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-1.5">
+                              <ImageIcon className="h-4 w-4" />
+                              Detected Lines
+                            </h4>
+                            <div className="rounded-xl overflow-hidden border border-slate-700/50 bg-slate-800/40">
+                              <img
+                                src={`data:image/png;base64,${(results[expandedCardIdx] as any).annotated_image_b64}`}
+                                alt="Annotated"
+                                className="w-full object-contain max-h-[400px]"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Extracted text */}
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-sm font-semibold text-white flex items-center gap-1.5">
+                              <Type className="h-4 w-4" />
+                              Extracted Text
+                            </h4>
+                            <button
+                              onClick={() => copyToClipboard(results[expandedCardIdx]?.full_text ?? '')}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-white/5 hover:bg-white/10 text-slate-300 transition-all cursor-pointer"
+                            >
+                              <Copy className="h-3 w-3" />
+                              Copy
+                            </button>
+                          </div>
+                          <div className="rounded-xl px-4 py-3 border leading-loose bg-slate-800/50 border-slate-700/60 max-h-[300px] overflow-y-auto">
+                            <p className="rtl urdu-font text-right leading-relaxed text-base" dir="rtl" style={{lineHeight:'2.4', color:'#e2e8f0'}}>
+                              {results[expandedCardIdx]?.full_text || (
+                                <span className="text-slate-600 italic">No text detected.</span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Per-line results */}
+                      {(results[expandedCardIdx] as any)?.lines?.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-semibold text-white mb-3">
+                            Per-Line Results{' '}
+                            <span className="font-normal text-sm text-slate-500">
+                              ({(results[expandedCardIdx] as any).lines.length})
+                            </span>
+                          </h4>
+                          <div className="rounded-xl border border-slate-700/40 max-h-[300px] overflow-y-auto">
+                            <table className="w-full text-sm">
+                              <thead className="sticky top-0 z-10">
+                                <tr className="bg-white/[0.03]">
+                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">#</th>
+                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">Text (Urdu)</th>
+                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400">Confidence</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(results[expandedCardIdx] as any).lines.map((line: OcrLine, i: number) => (
+                                  <tr key={i} className="border-t border-slate-800/50 hover:bg-white/[0.02] transition-colors">
+                                    <td className="py-2 px-4 font-mono text-xs text-slate-500">{i + 1}</td>
+                                    <td className="py-2 px-4 rtl urdu-font text-right" dir="rtl"><span className="text-slate-200" style={{lineHeight:'2'}}>{line.text}</span></td>
+                                    <td className="py-2 px-4">
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${confidenceBg(line.confidence)}`}>
+                                        {Math.round(line.confidence * 100)}%
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Confidence stats */}
+                      <div>
+                        <h4 className="text-sm font-semibold text-white mb-3">Confidence Statistics</h4>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          {statsBars(results[expandedCardIdx]?.confidence_stats ?? { mean: 0, min: 0, max: 0, median: 0 }).map(({ label, value, color }) => (
+                            <div key={label} className="rounded-xl px-3 py-2.5 bg-white/[0.02] border border-slate-700/40">
+                              <div className="flex justify-between text-xs mb-1">
+                                <span className="text-slate-400">{label}</span>
+                                <span className={`font-semibold ${confidenceColor(value)}`}>{Math.round(value * 100)}%</span>
+                              </div>
+                              <div className="h-1.5 rounded-full overflow-hidden bg-slate-800/80">
+                                <div className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-700`} style={{ width: `${Math.round(value * 100)}%` }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-12">
+                      <AlertTriangle className="h-10 w-10 mx-auto mb-3 text-red-400" />
+                      <h3 className="font-semibold text-red-400 mb-1">Processing Failed</h3>
+                      <p className="text-sm text-slate-400">{(results[expandedCardIdx] as any)?.message || 'An unexpected error occurred.'}</p>
+                    </div>
+                  )}
+                </DialogBody>
+              </DialogContent>
+            </Dialog>
           )}
         </div>
       )}
