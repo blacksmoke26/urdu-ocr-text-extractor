@@ -680,6 +680,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                           Model
                         </label>
                         <SelectAdvanced
+                          clearable={false}
                           value={detType}
                           onChange={(v) => setDetType(v as 'yolo' | 'detr' | 'mllm')}
                           placeholder="Select model"
@@ -714,6 +715,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                           Device
                         </label>
                         <SelectAdvanced
+                          clearable={false}
                           value={device}
                           onChange={(v) => setDevice(v as 'cpu' | 'cuda')}
                           placeholder="Select device"

@@ -480,7 +480,7 @@ export const SelectAdvanced: React.FC<SelectAdvancedProps> = (props) => {
         <Flex
           align="center"
           justify="between"
-          className={`w-[${triggerWidth}] h-9 px-2 rounded-md border border-gray-6 bg-gray-1 hover:bg-gray-2 data-[state=open]:bg-gray-2 cursor-pointer text-sm transition-colors ${disabled || loading ? 'opacity-50 pointer-events-none' : ''}`}
+          className={`w-[${triggerWidth}] h-9 px-2 rounded-md border border-slate-700/50 bg-slate-900/60 hover:bg-gray-2 data-[state=open]:bg-gray-2 cursor-pointer text-sm transition-colors ${disabled || loading ? 'opacity-50 pointer-events-none' : ''}`}
           style={{width: triggerWidth}}
           tabIndex={0}
         >
