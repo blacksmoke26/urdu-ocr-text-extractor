@@ -376,3 +376,117 @@ export interface HistoryResponse {
   entries: HistoryEntry[];
   count: number;
 }
+
+// ─── Spell Checker v4 Types ─────────────────────────────────────
+
+/** A single error found during text analysis. */
+export interface SpellError {
+  word: string;
+  position: number;
+  length: number;
+  suggestions: string[];
+  confidence?: number;
+  reason?: string;
+}
+
+/** Response from /spell/analyze — structured errors without auto-correction. */
+export interface AnalyzeResponse {
+  original: string;
+  detected_script: 'urdu' | 'arabic' | 'mixed';
+  errors: SpellError[];
+  total_errors: number;
+  grammar_flags?: GrammarFlags;
+}
+
+/** Per-word suggestion with confidence score. */
+export interface Suggestion {
+  candidate: string;
+  confidence: number;
+  reason?: string;
+}
+
+/** Response from /spell/suggest — top-N corrections per word.
+ * @note Backend returns { original, suggestions } — the corrected text may be under `corrected` or omitted. */
+export interface SuggestResponse {
+  original?: string;
+  text?: string;
+  corrected?: string;
+  suggested?: string;
+  suggestions: Record<string, Suggestion[]>;
+}
+
+/** Single result within a batch response. */
+export interface BatchSpellResult {
+  index: number;
+  original: string;
+  corrected: string;
+  corrections_applied: number;
+  has_errors: boolean;
+}
+
+/** Response from /spell/batch — multiple texts processed together. */
+export interface BatchResponse {
+  results: BatchSpellResult[];
+  total_texts: number;
+  total_corrections: number;
+  texts_with_errors: number;
+}
+
+/** Urdu-to-Latin transcription result per word. */
+export interface RomanizeWord {
+  urdu: string;
+  latin: string;
+}
+
+/** Response from /spell/romanize — approximate Urdu-to-Latin transcription.
+ * @note Backend returns { original, romanized } with a single string, not per-word arrays. */
+export interface RomanizeResponse {
+  original?: string;
+  full_transcription?: string;
+  romanized?: string;
+  words?: RomanizeWord[];
+}
+
+/** Grammar detection flags from analysis. */
+export interface GrammarFlags {
+  missing_negation?: boolean;
+  repetitive_words?: boolean;
+}
+
+/** Analytics data from /spell/analytics — session statistics. */
+export interface AnalyticsResponse {
+  total_corrections: number;
+  total_texts_processed: number;
+  correction_rate: number;
+  average_confidence?: number;
+  strategy_usage: Record<string, number>;
+  dictionary_stats: {
+    words_count: number;
+    bigrams_count: number;
+    trigrams_count: number;
+    total_unique_tokens: number;
+  };
+}
+
+/** User dictionary entry. */
+export interface UserDictEntry {
+  word: string;
+  added_at: string;
+}
+
+/** Response for user dictionary operations.
+ * @note Backend returns { added, user_dict_size } on add and { removed, success, user_dict_size } on remove. */
+export interface UserDictResponse {
+  status?: 'added' | 'removed' | 'error';
+  added?: string;
+  removed?: string;
+  success?: boolean;
+  message?: string;
+  user_dict_size?: number;
+}
+
+/** Full user dictionary listing. */
+export interface UserDictListResponse {
+  words: UserDictEntry[];
+  total: number;
+}
