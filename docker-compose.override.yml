@@ -1,0 +1,31 @@
+# docker-compose.override.yml — Development overrides (mounted volumes, watch mode)
+# This file is automatically loaded by docker-compose alongside docker-compose.yml
+# It enables live code reload during development.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-base
+    volumes:
+      - ./backend:/app/backend
+      - backend-cache:/app/backend/cache
+      - backend-results:/app/backend/results
+      - backend-logs:/app/backend/logs
+    environment:
+      - OCR_RELOAD=true
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend-build
+    volumes:
+      - ./frontend:/app/frontend
+    command: ["npm", "run", "dev", "--", "--host"]
+
+volumes:
+  backend-cache:
+  backend-results:
+  backend-logs:

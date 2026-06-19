@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  # ──────────────────────────────────────────────────────────────────────
+  # Backend — Urdu OCR FastAPI server
+  # ──────────────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-base
+    container_name: urdu-ocr-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - OCR_DEVICE=${OCR_DEVICE:-auto}
+      - OCR_HOST=0.0.0.0
+      - OCR_PORT=8000
+      - OCR_WORKERS=${OCR_WORKERS:-1}
+      - OCR_LOG_LEVEL=${OCR_LOG_LEVEL:-INFO}
+      - OCR_CACHE_ENABLED=${OCR_CACHE_ENABLED:-true}
+      - OCR_RATE_LIMIT_ENABLED=${OCR_RATE_LIMIT_ENABLED:-true}
+      - OCR_API_KEYS=${OCR_API_KEYS:-}
+      - OCR_CORS_ORIGINS=${OCR_CORS_ORIGINS:-*}
+    volumes:
+      - backend-cache:/app/backend/cache
+      - backend-results:/app/backend/results
+      - backend-logs:/app/backend/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Frontend — Vite dev server (development) or nginx (production)
+  # ──────────────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+    container_name: urdu-ocr-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+# ──────────────────────────────────────────────────────────────────────
+# Volumes
+# ──────────────────────────────────────────────────────────────────────
+volumes:
+  backend-cache:
+  backend-results:
+  backend-logs:

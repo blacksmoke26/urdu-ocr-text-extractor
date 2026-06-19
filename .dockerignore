@@ -1,0 +1,41 @@
+# .dockerignore — files to exclude from Docker build context
+.git
+.gitignore
+.agents
+.idea
+.playwright-mcp
+.trash
+node_modules
+venv
+__pycache__
+*.egg-info
+dist
+
+# Logs and caches
+logs/
+cache/
+results/
+uploads/
+exports/
+glyphs/
+urdu-dict/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Env files (sensitive)
+.env
+.env.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docs (not needed in image)
+docs/
+README.md
+tests/
+screenshots/
