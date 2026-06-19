@@ -76,16 +76,16 @@ class TextCleaner:
 
     @staticmethod
     def _ensure_spell_checker():
-        """Lazy-initialize the UrduSpellChecker on first use."""
+        """Lazy-initialize the UrduSpellChecker on first use with all config options."""
         if TextCleaner._spell_checker is None:
             from engine.spell_checker import UrduSpellChecker
             mode = os.environ.get("URDUTEXT_AUTOCORRECT_MODE", "hybrid").lower()
-            # Only enable n-gram for hybrid mode (context-aware)
             ngram_order = 2 if mode == "hybrid" else 1
             TextCleaner._spell_checker = UrduSpellChecker(
-                max_distance=int(os.environ.get("SPELL_CHECK_MAX_DISTANCE", "2")),
+                max_distance=int(os.environ.get("SPELL_CHECK_MAX_DISTANCE", "3")),
                 use_word_freq=os.environ.get("SPELL_CHECK_USE_WORD_FREQ", "true").lower() == "true",
                 ngram_order=ngram_order,
+                confidence_threshold=float(os.environ.get("SPELL_CHECK_CONFIDENCE_THRESHOLD", "0.35")),
             )
         return TextCleaner._spell_checker  # type: ignore[return-value]
 
@@ -262,7 +262,7 @@ class TextCleaner:
     @staticmethod
     def clean_and_autocorrect(
         text: str,
-        mode: str = "hybrid",  # "char" | "distance" | "context" (context=hybrid)
+        mode: str = "hybrid",  # "char" | "distance" | "context" | "hybrid" | "aggressive"
         diacritics: bool = False,
         normalize_alef_chars: bool = True,
         normalize_tatil: bool = True,
@@ -275,6 +275,7 @@ class TextCleaner:
         - "char":       Character confusion map only (fastest)
         - "distance":   Dictionary lookup with Levenshtein distance (balanced)
         - "context"/"hybrid": Full hybrid with n-gram scoring + UrduHack (best quality)
+        - "aggressive": Maximum corrections with lower confidence threshold
 
         Returns (cleaned_text, correction_stats).
         """

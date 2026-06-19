@@ -93,12 +93,18 @@ CORS_ORIGINS: list[str] = [
 TEXT_CLEANING_ENABLED: bool = os.getenv("OCR_TEXT_CLEANING_ENABLED", "true").lower() == "true"
 
 # ─── Urdu Text Auto-Correction ────────────────────────────────
-URDUTEXT_AUTOCORRECT_ENABLED: bool = os.getenv("URDUTEXT_AUTOCORRECT_ENABLED", "false").lower() == "true"
-URDUTEXT_AUTOCORRECT_MODE: str = os.getenv("URDUTEXT_AUTOCORRECT_MODE", "hybrid").lower()  # char | distance | hybrid
+URDUTEXT_AUTOCORRECT_ENABLED: bool = os.getenv("URDUTEXT_AUTOCORRECT_ENABLED", "true").lower() == "true"
+URDUTEXT_AUTOCORRECT_MODE: str = os.getenv("URDUTEXT_AUTOCORRECT_MODE", "hybrid").lower()  # char | distance | hybrid | aggressive
 
-# ─── Spell Check Settings ──────────────────────────────────────
-SPELL_CHECK_MAX_DISTANCE: int = int(os.getenv("SPELL_CHECK_MAX_DISTANCE", "2"))  # max Levenshtein distance
+# ─── Spell Check Settings (configurable via env) ────────────────
+SPELL_CHECK_MAX_DISTANCE: int = int(os.getenv("SPELL_CHECK_MAX_DISTANCE", "3"))  # max Levenshtein distance
 SPELL_CHECK_USE_WORD_FREQ: bool = os.getenv("SPELL_CHECK_USE_WORD_FREQ", "true").lower() == "true"
+SPELL_CHECK_CONFIDENCE_THRESHOLD: float = float(os.getenv("SPELL_CHECK_CONFIDENCE_THRESHOLD", "0.35"))  # min correction score (0.0-1.0)
+SPELL_CHECK_SENTENCE_AWARE: bool = os.getenv("SPELL_CHECK_SENTENCE_AWARE", "true").lower() == "true"
+SPELL_CHECK_PROTECT_ENGLISH: bool = os.getenv("SPELL_CHECK_PROTECT_ENGLISH", "true").lower() == "true"
+SPELL_CHECK_PHONETIC_ENABLED: bool = os.getenv("SPELL_CHECK_PHONETIC_ENABLED", "true").lower() == "true"
+SPELL_CHECK_COMPOUND_DECOMPOSITION: bool = os.getenv("SPELL_CHECK_COMPOUND_DECOMPOSITION", "true").lower() == "true"
+SPELL_CHECK_URDUHACK_FINAL_PASS: bool = os.getenv("SPELL_CHECK_URDUHACK_FINAL_PASS", "true").lower() == "true"
 SPELL_CHECK_DICT_DIR = os.getenv("URDU_DICT_DIR")  # custom dict path (auto-detected if None)
 
 # ─── Detection Enhancements ────────────────────────────────────
