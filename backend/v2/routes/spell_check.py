@@ -244,6 +244,24 @@ async def spell_remove_user_word(req: DictWordRequest):
 
 
 @spell_router.get(
+    "/spell/user-dict",
+    summary="List all words in the user dictionary",
+    description="Return the current list of user-provided words that are always considered valid.",
+)
+async def spell_get_user_dict():
+    try:
+        from engine.spell_checker.checker import UrduSpellChecker
+        checker = UrduSpellChecker()
+        words = sorted(checker.get_user_dict())
+        return JSONResponse({
+            "words": [{"word": w} for w in words],
+            "total": len(words),
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": f"Getting user dict failed: {str(e)}"})
+
+
+@spell_router.get(
     "/spell/analytics",
     summary="Get spell checker analytics for text",
     description=(

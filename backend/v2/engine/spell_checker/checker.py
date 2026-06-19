@@ -203,11 +203,11 @@ def _detect_script(text: str) -> str:
     if not text:
         return "unknown"
     urdu_chars = 0
-    total_urdi_arabic = 0
+    total_arabic_range = 0
     for ch in text:
         cp = ord(ch)
         if 0x0600 <= cp <= 0x06FF:
-            total_urdi_arabic += 1
+            total_arabic_range += 1
             # Urdu-specific characters (Urdu extension + Persian/Urdu additions)
             urdu_specific = {
                 0x0679, 0x0686, 0x0698, 0x06A9, 0x06BE,
@@ -217,10 +217,12 @@ def _detect_script(text: str) -> str:
             }
             if cp in urdu_specific:
                 urdu_chars += 1
-    if total_urdi_arabic == 0:
+    if total_arabic_range == 0:
         return "unknown"
-    # If >50% of Arabic-range chars are Urdu-specific, it's Urdu
-    if urdu_chars >= total_urdi_arabic // 2 and urdu_chars > 0:
+    # If >= 30% of Arabic-range chars are Urdu-specific, classify as Urdu.
+    # This avoids false negatives when text contains many shared Arabic-Urdu
+    # characters that aren't in the Urdu-specific set.
+    if urdu_chars >= total_arabic_range / 3 and urdu_chars > 0:
         return "urdu"
     return "arabic"
 
