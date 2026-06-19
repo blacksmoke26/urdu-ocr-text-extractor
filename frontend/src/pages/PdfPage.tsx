@@ -89,12 +89,12 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
   // OCR-specific params
   const [confThreshold, setConfThreshold] = useState(0.2);
   const [imgSize, setImgSize] = useState(1280);
-  const [textCleaning, setTextCleaning] = useState(true);
+  const [textCleaning, setTextCleaning] = useState(false);
 
   // Advanced options state
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [useCache, setUseCache] = useState(true);
-  const [device, setDevice] = useState<'cpu' | 'cuda'>('cuda');
+  const [device, setDevice] = useState<'cpu' | 'cuda'>('cpu');
   const [detType, setDetType] = useState<'yolo' | 'detr' | 'mllm'>('yolo');
   const [detConf, setDetConf] = useState(0.5);
   const [layoutAnalysis, setLayoutAnalysis] = useState(false);
@@ -345,6 +345,10 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
         setPagesCompleted(partial.pages.length);
         setCurrentTaskId(partial.task_id || null);
         addToast(`Stopped: ${partial.message || 'Process interrupted.'}`, 'info');
+      } else if (err?.response?.status === 504) {
+        // Timeout — page processing timed out
+        const errMsg = err?.response?.data?.message || 'Page processing timed out.';
+        addToast(errMsg, 'error');
       } else {
         addToast(err?.message || 'PDF OCR failed.', 'error');
       }
@@ -1106,7 +1110,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                   <div className={`w-px h-8 ${isDark ? 'bg-slate-700/50' : 'bg-gray-200'}`} />
 
                   {/* Text Cleaning Toggle */}
-                  <label className="flex items-center gap-2.5 cursor-pointer group">
+                  <label className="flex items-center gap-2.5 cursor-pointer group relative top-[-6px]">
                     <div className={`relative w-10 h-5.5 rounded-full transition-all duration-300 ${textCleaning ? 'bg-violet-500 shadow-lg shadow-violet-500/40' : isDark ? 'bg-slate-700' : 'bg-gray-300'}`}>
                       <input type="checkbox" checked={textCleaning} onChange={() => setTextCleaning(!textCleaning)} className="sr-only peer" />
                       <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300 ${textCleaning ? 'translate-x-4.5' : ''}`} />
