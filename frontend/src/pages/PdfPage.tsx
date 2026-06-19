@@ -586,7 +586,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${confBg(confMean)}`}>
                           {Math.round(confMean * 100)}% confidence
                         </span>
-                        {(pg as any).corrections_count && (pg as any).corrections_count > 0 && (
+                        {Boolean((pg as any).corrections_count) && (pg as any).corrections_count > 0 && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30">
                             <BookText className="h-3 w-3" />
                             {(pg as any).corrections_count} correction{((pg as any).corrections_count > 1 ? 's' : '')}
