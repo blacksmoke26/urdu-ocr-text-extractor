@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import time
 
-import fitz  # PyMuPDF
+logger = logging.getLogger("pdf_route")
 
+import fitz  # PyMuPDF
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response as FastAPIResponse
-
 from config import MAX_FILE_SIZE_MB, THUMB_WIDTH, THUMB_HEIGHT
 from engine.loader import load_models
 from engine.metrics import get_metrics
+from engine.pipeline import OCRResult
 from services.pdf_service import PDFService
-
 from utils.image_utils import validate_file_size
 from task_queue.interrupt import get_interrupt_tracker
 from task_queue.progress import get_progress_tracker
@@ -333,6 +334,20 @@ async def pdf_ocr_endpoint(
     results = []
     total_lines = 0
 
+    # Per-page timeout (30 minutes) to prevent infinite hangs on corrupted pages.
+    PAGE_TIMEOUT = 1800
+    # Overall task timeout (4 hours)
+    OVERALL_TIMEOUT = 14400
+
+    async def _ocr_page_async(doc_bytes, pnum):
+        """Wrapper that enforces per-page timeout."""
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _ocr_page, doc_bytes, pnum),
+            timeout=PAGE_TIMEOUT,
+        )
+
+    overall_start = time.perf_counter()
+
     try:
         for i in range(pg_start - 1, pg_end):
             current_page_num = i + 1
@@ -354,6 +369,19 @@ async def pdf_ocr_endpoint(
             if i > pg_start - 1:
                 await asyncio.sleep(0)
 
+            # Check overall timeout
+            elapsed = time.perf_counter() - overall_start
+            if elapsed > OVERALL_TIMEOUT:
+                return JSONResponse({
+                    "task_id": effective_task_id,
+                    "filename": file.filename,
+                    "status": "timeout",
+                    "message": f"Overall processing exceeded {OVERALL_TIMEOUT // 60} minutes. Processed {len(results)}/{pg_end - pg_start + 1} pages.",
+                    "total_pages": len(results),
+                    "total_text_lines": total_lines,
+                    "pages": results,
+                })
+
             # Run blocking OCR for this single page off the event loop thread
             page_t = time.perf_counter()
 
@@ -370,7 +398,29 @@ async def pdf_ocr_endpoint(
                     **advanced,
                 )
 
-            page_results = await loop.run_in_executor(None, _ocr_page, data_bytes, current_page_num)
+            try:
+                page_results = await _ocr_page_async(data_bytes, current_page_num)
+            except asyncio.TimeoutError:
+                logger.error(f"Page {current_page_num}: OCR timed out after {PAGE_TIMEOUT}s — skipping.")
+                results.append(OCRResult(
+                    filename=f"{file.filename}_page_{current_page_num}", file_type="pdf_page", lines=[], full_text="",
+                    processing_time_ms=PAGE_TIMEOUT * 1000,
+                ))
+                # Update progress even on timeout so the UI doesn't hang
+                prog_tracker.update_page(effective_task_id, len(results), PAGE_TIMEOUT * 1000)
+                await ws_manager.broadcast_to_task(
+                    effective_task_id,
+                    {
+                        "type": "live_pdf",
+                        "data": {
+                            "pages_completed": len(results),
+                            "total_pages": pg_end - pg_start + 1,
+                            "percentage": round(len(results) / (pg_end - pg_start + 1) * 100, 1),
+                            "last_page_time_ms": PAGE_TIMEOUT * 1000,
+                        }
+                    }
+                )
+                continue
 
             elapsed_page_ms = (time.perf_counter() - page_t) * 1000
 

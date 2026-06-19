@@ -102,8 +102,21 @@ class OCRService:
                 raise KeyboardInterrupt(f"OCR process interrupted at page {page_num + 1}")
 
             page = doc[page_num]
-            pix = page.get_pixmap(dpi=300)
-            img_bytes = io.BytesIO(pix.tobytes("png"))
+            try:
+                pix = page.get_pixmap(dpi=300)
+                img_bytes = io.BytesIO(pix.tobytes("png"))
+            except Exception as e:
+                import logging
+                log = logging.getLogger('ocr')
+                log.warning(f"Page {page_num + 1}: Failed to extract image — skipping: {e}")
+                # Skip broken pages instead of hanging
+                page_filename = f"{filename}_page_{page_num + 1}"
+                results.append(OCRResult(
+                    filename=page_filename, file_type="pdf_page", lines=[], full_text="",
+                    processing_time_ms=0.0,
+                ))
+                continue
+
             page_filename = f"{filename}_page_{page_num + 1}"
 
             # Generate thumbnail
@@ -120,8 +133,9 @@ class OCRService:
                 result._page_thumb_b64 = page_thumb_b64  # type: ignore
                 results.append(result)
             except Exception as e:
-                import time as _time
-                import traceback
+                import logging
+                log = logging.getLogger('ocr')
+                log.error(f"Page {page_num + 1}: OCR failed — skipping. Error: {e}")
                 results.append(OCRResult(
                     filename=page_filename, file_type="pdf_page", lines=[], full_text="",
                     processing_time_ms=0.0,

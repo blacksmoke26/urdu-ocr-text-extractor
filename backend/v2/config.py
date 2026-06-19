@@ -19,6 +19,7 @@ RELOAD: bool = os.getenv("OCR_RELOAD", "false").lower() == "true"
 
 # ─── Device ───────────────────────────────────────────────────
 DEFAULT_DEVICE: str = os.getenv("OCR_DEVICE", "auto").lower()  # auto | cpu | cuda
+YOLO_DEVICE: str = os.getenv("OCR_YOLO_DEVICE", "auto").lower()  # auto | cpu | cuda
 
 # ─── Model Paths ──────────────────────────────────────────────
 MODELS_DIR = BASE_DIR / "models"
@@ -134,6 +135,10 @@ def validate_config() -> list[str]:
     if DEFAULT_DEVICE not in ("auto", "cpu", "cuda"):
         warnings.append(f"Invalid OCR_DEVICE value: '{DEFAULT_DEVICE}'. Using 'auto'.")
         globals()["DEFAULT_DEVICE"] = "auto"
+
+    if YOLO_DEVICE not in ("auto", "cpu", "cuda"):
+        warnings.append(f"Invalid OCR_YOLO_DEVICE value: '{YOLO_DEVICE}'. Using 'auto'.")
+        globals()["YOLO_DEVICE"] = "auto"
 
     if RATE_LIMIT_REQUESTS <= 0:
         warnings.append("RATE_LIMIT_REQUESTS must be positive. Disabling rate limiting.")

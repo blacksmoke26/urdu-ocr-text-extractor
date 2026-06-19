@@ -365,6 +365,29 @@ def load_models(device_label: Optional[str] = None) -> dict:
     _recognition_model.load_state_dict(state_dict)
     _recognition_model.eval()
 
+    # Detect CUDA kernel compatibility by running a small inference test.
+    # The model may "load" on CUDA even when kernels are incompatible,
+    # but actual inference will silently hang or produce wrong results.
+    if device.type == "cuda":
+        try:
+            dummy_tensor = torch.randn(1, 1, 32, 400, device=device)
+            with torch.no_grad():
+                _recognition_model(dummy_tensor)
+        except RuntimeError as inference_err:
+            print(f"[v2] CUDA kernel test failed ({inference_err}) — switching to CPU.")
+            cuda_kernels_ok = False
+        else:
+            cuda_kernels_ok = True
+
+        if not cuda_kernels_ok:
+            print(f"[v2] CUDA kernel test failed — switching recognition to CPU (kernel image unavailable for your GPU).")
+            device = torch.device("cpu")
+            _device = device
+            _recognition_model = _recognition_model.to(device)
+            # Also force YOLO onto CPU to avoid hanging during detection.
+            if os.environ.get("OCR_YOLO_DEVICE", "auto").lower() == "auto":
+                os.environ["OCR_YOLO_DEVICE"] = "cpu"
+
     from ultralytics import YOLO
     _detection_model = YOLO(str(DETECTION_MODEL_PATH))
 

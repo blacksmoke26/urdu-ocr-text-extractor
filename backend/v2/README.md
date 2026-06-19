@@ -87,7 +87,8 @@ See `config.example.env` for all options. Key variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OCR_DEVICE` | `auto` | `cpu`, `cuda`, or `auto` |
+| `OCR_DEVICE` | `auto` | Recognition model device: `cpu`, `cuda`, or `auto` |
+| `OCR_YOLO_DEVICE` | `auto` | YOLO detection device: `cpu`, `cuda`, or `auto` (auto-fallback to CPU if CUDA kernels are incompatible) |
 | `OCR_CONF_THRESHOLD` | `0.2` | YOLO detection confidence |
 | `OCR_IMG_SIZE` | `1280` | Input image size for YOLO |
 | `OCR_MAX_FILE_SIZE_MB` | `500` | Max upload file size |

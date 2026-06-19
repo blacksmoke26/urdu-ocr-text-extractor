@@ -13,6 +13,9 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     echo "[v2] Loaded .env file"
 fi
 
+# Override OCR_DEVICE to cpu if desired (useful when CUDA is installed but kernels are incompatible)
+export OCR_DEVICE="${OCR_DEVICE:-auto}"
+
 cd "$SCRIPT_DIR" || exit 1
 
 echo "Starting server on ${OCR_HOST:-localhost}:${OCR_PORT:-8000} ..."
