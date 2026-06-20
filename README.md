@@ -211,23 +211,28 @@ TXT, JSON, CSV, DOCX (Word), Searchable PDF — both image and PDF OCR results c
 
 ## FAQ
 
-For a comprehensive FAQ with **50+ questions** organized by topic (getting started, Docker, models & hardware, OCR processing, image enhancement, PDF processing, spell check, AI analysis, export formats, API & developer, system & monitoring, performance & troubleshooting, and MCP server), see **[FAQs/README.md](FAQs/README.md)**.
+For a comprehensive FAQ with **50+ questions** organized by topic (getting started, Docker, models & hardware, OCR processing, image enhancement, PDF processing, spell check, AI analysis, export formats, API & developer, system & monitoring, performance & troubleshooting, and MCP server), see **[FAQs.md](FAQs.md)**.
 
 **Quick answers:**
 
 **Where are the API docs?**
+
 All endpoints are documented interactively at `http://localhost:8000/docs` (Swagger UI) and `http://localhost:8000/redoc`. You can also get running config via `GET /api/v2/config` — it shows server settings, model params, feature flags, and limits.
 
 **Does it work without a GPU?**
+
 Yes. The app runs on CPU with both YOLOv8 and UTRNet models. A CUDA-enabled GPU is optional for faster inference and can be switched dynamically via the System page or `POST /api/v2/device/switch`.
 
 **How does spell checking work?**
+
 The spell checker uses a hybrid engine: character confusion tables, Levenshtein distance scoring, phonetic matching rules, compound word decomposition, n-gram context frequencies from UrduHack, and a final UrduHack pass. Mode selection (char / distance / hybrid / aggressive) controls aggressiveness.
 
 **Can I correct Urdu text without OCR?**
+
 Yes. The Spell Check page works on any pasted Urdu text — it's fully independent of the OCR pipeline. It also supports batch correction across multiple texts simultaneously.
 
 **What about caching?**
+
 Results are cached by content hash with a configurable TTL (default 1 hour). Repeated processing of the same file is served instantly from cache. Cache stats and clear commands are available on the System page.
 
 ---
