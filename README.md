@@ -36,6 +36,63 @@ Open `http://localhost:5174` in your browser and start extracting Urdu text from
 
 **Interactive API docs are available at** `/docs` **on the backend (Swagger UI) and** `/redoc`. Explore all 30+ endpoints with live test forms!
 
+### Docker Quickstart
+
+Run the entire stack with a single command:
+
+```bash
+docker compose up --build
+```
+
+This starts both the backend (`:8000`) and frontend (`:80`, proxied via nginx). For development with live reload:
+
+```bash
+# The override file is applied automatically — mounted volumes + Vite dev server
+docker compose -f docker-compose.yml -f docker-compose.override.yml up --build
+```
+
+**Compose services:**
+
+| Service | Port | Purpose |
+|---|---|---|
+| `backend` | 8000 | FastAPI server (UTRNet + YOLOv8) |
+| `frontend` | 80 | React app served by nginx, proxying `/api/*` → backend |
+
+**Configurable via env vars:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `OCR_DEVICE` | `auto` | `cpu`, `cuda`, or `auto` |
+| `OCR_WORKERS` | `1` | Uvicorn worker count |
+| `OCR_LOG_LEVEL` | `INFO` | Logging verbosity |
+| `OCR_CACHE_ENABLED` | `true` | Result cache toggle |
+| `OCR_RATE_LIMIT_ENABLED` | `true` | Rate limiting toggle |
+
+> **Tip:** In development, `docker-compose.override.yml` mounts source directories as volumes so changes hot-reload instantly.
+
+---
+
+## MCP Server
+
+A bundled [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) server lives in `mcp-server/` — it exposes **42 tools**, **3 resources**, and **15 prompts** that wrap the entire Urdu OCR backend API. Use it in Claude Desktop, VS Code, or any MCP-compatible client.
+
+```bash
+cd mcp-server
+pip install -e .
+uv run server
+```
+
+**What's available:**
+- **OCR tools** — `ocr_single`, `ocr_batch`, `ocr_with_enhance`, `ocr_direct_tensor`
+- **PDF tools** — `pdf_info`, `pdf_extract`, `pdf_reconstruct`, `pdf_ocr`
+- **Export tools** — JSON, TXT, CSV, DOCX, searchable PDF (both single-image and PDF OCR results)
+- **Spell check tools** — auto-correct, analyze, suggest, batch, romanize, user dictionary
+- **Analysis tools** — document analysis, summarization, table detection, enhancement recommendations
+- **System tools** — health check, stats, device switching, cache management, config dump
+- **Workflow prompts** — `ocr_workflow`, `spell_check_workflow`, `pdf_ocr_workflow`, `document_quality_audit`, `export_pipeline` and more
+
+For a full tool reference and Claude Desktop setup guide, see [`mcp-server/README.md`](mcp-server/README.md).
+
 ---
 
 ## Features
@@ -54,14 +111,17 @@ Better preprocessing means significantly higher extraction accuracy on low-quali
 Comprehensive spell checking with six dedicated tools: auto-correct, text analysis, word-level suggestions, batch correction, Roman transcription, and a customizable user dictionary.
 
 Multi-strategy engine combining character confusion tables, Levenshtein distance, phonetic matching, compound word decomposition, n-gram language modeling, and a final UrduHack pass.
+
 ### AI-Powered Analysis
 Post-OCR auto-analysis includes Urdu language detection, document type classification (receipt, letter, form, table, handwritten), extractive text summarization with keyword extraction, and automatic table structure detection in OCR output.
 
 Every extraction comes with confidence histograms per detected line so you can gauge quality at a glance.
+
 ### Multi-Format Export
 Export extracted text as TXT, JSON, CSV, Word (.docx), or searchable PDF with embedded invisible text layer. Output adapts intelligently based on your input type — image or PDF — with format-aware recommendations and one-click download.
 
 PDF OCR results include per-page breakdowns with page-number separators.
+
 ### Monitoring & Control
 Real-time health dashboard, live API metrics, cache statistics, dynamic CPU ↔ CUDA device switching without restart, and full processing history with timestamps, line counts, and confidence stats.
 
@@ -150,6 +210,10 @@ TXT, JSON, CSV, DOCX (Word), Searchable PDF — both image and PDF OCR results c
 ---
 
 ## FAQ
+
+For a comprehensive FAQ with **50+ questions** organized by topic (getting started, Docker, models & hardware, OCR processing, image enhancement, PDF processing, spell check, AI analysis, export formats, API & developer, system & monitoring, performance & troubleshooting, and MCP server), see **[FAQs/README.md](FAQs/README.md)**.
+
+**Quick answers:**
 
 **Where are the API docs?**
 All endpoints are documented interactively at `http://localhost:8000/docs` (Swagger UI) and `http://localhost:8000/redoc`. You can also get running config via `GET /api/v2/config` — it shows server settings, model params, feature flags, and limits.
