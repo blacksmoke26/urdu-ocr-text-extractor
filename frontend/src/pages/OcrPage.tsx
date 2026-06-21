@@ -985,7 +985,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${confidenceBg(meanConf)}`}>
                             {Math.round(meanConf * 100)}% confidence
                           </span>
-                          {(result as any).corrections_count && (result as any).corrections_count > 0 && (
+                          {!!(result as any).corrections_count && (result as any).corrections_count > 0 && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30">
                               <BookText className="h-3 w-3" />
                               {(result as any).corrections_count} correction{((result as any).corrections_count > 1 ? 's' : '')}
