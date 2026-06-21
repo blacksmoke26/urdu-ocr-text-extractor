@@ -129,15 +129,22 @@ class TextCleaner:
 
     @staticmethod
     def normalize_tatil(text: str) -> str:
-        """Normalize 'tatil' characters (extended Arabic chars)."""
+        """Normalize 'tatil' characters (extended Arabic chars).
+        
+        Preserves Urdu-specific Persian/Urdu characters (پ, چ, گ, ے, ڑ) and only normalizes
+        clearly invalid tatil/arabic-only characters.
+        
+        NOTE: Previously this mapped Urdu Persian chars to Arabic equivalents, which broke
+        Urdu text output. Now it keeps all Urdu-specific characters intact.
+        """
         substitutions = {
-            "\u06A6": "\u0643",  # Persian Kaf -> Arabic Kaf
-            "\u06AF": "\u063A",  # Persian Gha'in -> Arabic Ghain
-            "\u0698": "\u062C",  # Urdu Je -> Arabic Je
-            "\u0686": "\u0686",  # Urdu Cha — keep as-is
-            "\u067E": "\u067E",  # Urdu Pe — keep as-is
-            "\u0691": "\u062F",  # Urdu Dal -> Arabic Dal
-            "\u06BE": "\u0628",  # Urdu Beh -> Arabic Beh
+            # Keep all Urdu-specific characters - DO NOT convert them
+            # \u06A6 (Persian Kaf) - keep as-is for Urdu
+            # \u06AF (Urdu Gaf) - keep as-is for Urdu
+            # \u0698 (Urdo Je) - keep as-is for Urdu
+            # \u067E (Urdu Pe) - keep as-is for Urdu  
+            # \u0691 (Urdu Dal) - keep as-is for Urdu
+            # \u06BE (Urdu Beh) - keep as-is for Urdu
         }
         for src, dst in substitutions.items():
             text = text.replace(src, dst)

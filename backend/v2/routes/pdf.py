@@ -5,12 +5,16 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
+import tempfile
 import time
+from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger("pdf_route")
 
 import fitz  # PyMuPDF
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, Response as FastAPIResponse
 from config import MAX_FILE_SIZE_MB, THUMB_WIDTH, THUMB_HEIGHT
 from engine.loader import load_models
@@ -26,38 +30,162 @@ pdf_router = APIRouter(prefix="/api/v2", tags=["PDF"])
 
 # ── Helpers ────────────────────────────────────────────────────────
 
-def _read_pdf(file: UploadFile) -> bytes:
-    content = file.file.read() if hasattr(file.file, "read") else file.file.getvalue()
-    return bytes(content)
+async def _read_pdf(file: UploadFile) -> bytes:
+    """Read entire uploaded file into memory using FastAPI's async read."""
+    return await file.read()
+
+
+def _get_pdf_page_count(pdf_data: bytes) -> int:
+    """Get total page count from PDF without keeping doc open."""
+    doc = fitz.open(stream=pdf_data, filetype="pdf")
+    count = len(doc)
+    doc.close()
+    return count
+
+
+def _safe_close_doc(doc: fitz.Document) -> None:
+    """Safely close a PyMuPDF document, ignoring errors."""
+    try:
+        if doc and not doc.is_closed:
+            doc.close()
+    except Exception:
+        pass
 
 
 @pdf_router.post(
     "/pdf/info",
     summary="Get PDF metadata",
-    description="Extract total pages, titles, and other metadata from a PDF.",
+    description="Extract total pages, titles, and other metadata from a PDF. For large PDFs, use 'light=true' to skip per-page scanning.",
 )
-async def pdf_info_endpoint(file: UploadFile = File(...)):
+async def pdf_info_endpoint(
+    file: UploadFile = File(...),
+    light: bool = Query(True, description="Light mode: skip per-page metadata for faster response on large PDFs"),
+    max_pages_full: int = Query(500, description="Max pages to scan in full mode. Beyond this, only page count is returned."),
+):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
-    data_bytes = _read_pdf(file)
-    ok, msg = validate_file_size(data_bytes, MAX_FILE_SIZE_MB)
-    if not ok:
-        raise HTTPException(status_code=400, detail=msg)
+    # For very large files, use streaming to temp file instead of in-memory bytes
+    is_large = False
+    file_path: Optional[str] = None
+    data_bytes_for_validate: Optional[bytes] = None
+    
+    try:
+        raw_cl = file.headers.get("content-length")
+        cl_val = int(raw_cl) if raw_cl else 0
+        is_large = cl_val > 50 * 1024 * 1024
+        if is_large:
+            # Save to temp file for memory efficiency
+            fd, file_path = tempfile.mkstemp(suffix=".pdf")
+            size = 0
+            with os.fdopen(fd, "wb") as f:
+                while True:
+                    chunk = await file.read(1024 * 1024)  # 1 MB chunks
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    size += len(chunk)
+        else:
+            data_bytes_for_validate = await _read_pdf(file)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
 
-    info = PDFService.get_info(data_bytes)
+    try:
+        if is_large and file_path:
+            # Use temp file for large PDFs - memory efficient
+            info = _get_pdf_info_from_file(file_path, light_mode=light, max_pages=max_pages_full)
+        else:
+            # Validate size before processing
+            ok, msg = validate_file_size(data_bytes_for_validate, MAX_FILE_SIZE_MB)
+            if not ok:
+                raise HTTPException(status_code=400, detail=msg)
+            info = PDFService.get_info_light(data_bytes_for_validate, light_mode=light, max_pages=max_pages_full)
 
-    # Record per-API metrics
-    metrics = get_metrics()
-    metrics.api_pdf.record_success(files=1)
-    latency_ms = 0.5  # info is fast, approximate
-    metrics.latency_global.record(latency_ms)
-    metrics.latency_pdf.record(latency_ms)
-    metrics.total_requests.inc()
-    return JSONResponse({
-        "filename": file.filename,
-        **info,
-    })
+        # Record per-API metrics
+        metrics = get_metrics()
+        actual_latency = 1.0 if light else max(5.0, len(info.get("pages", [])) * 2)
+        metrics.api_pdf.record_success(files=1)
+        metrics.latency_global.record(actual_latency)
+        metrics.latency_pdf.record(actual_latency)
+        metrics.total_requests.inc()
+
+        return JSONResponse({
+            "filename": file.filename,
+            "file_size_bytes": info.get("file_size_bytes"),
+            **info,
+        })
+    finally:
+        # Clean up temp file if created
+        if file_path and os.path.exists(file_path):
+            try:
+                os.unlink(file_path)
+            except Exception:
+                pass
+
+
+def _get_pdf_info_from_file(file_path: str, light_mode: bool = True, max_pages: int = 500) -> dict:
+    """Get PDF info using temp file — memory efficient for large PDFs."""
+    doc = fitz.open(file_path)
+    total_pages = len(doc)
+
+    meta = doc.metadata or {}
+    result = {
+        "total_pages": total_pages,
+        "file_size_bytes": os.path.getsize(file_path),
+        "metadata": {
+            "title": (meta.get("title") or "").strip() or None,
+            "author": (meta.get("author") or "").strip() or None,
+            "subject": (meta.get("subject") or "").strip() or None,
+            "creator": (meta.get("creator") or "").strip() or None,
+            "producer": (meta.get("producer") or "").strip() or None,
+        },
+    }
+
+    # Only scan per-page metadata if light_mode is False and within max_pages
+    if not light_mode and total_pages <= max_pages:
+        pages_info = []
+        for i in range(total_pages):
+            page = doc[i]
+            # Use get_contents() which doesn't render — just reads the content stream length
+            page_rect = page.rect
+            pages_info.append({
+                "page_number": i + 1,
+                "title": (meta.get("title") or f"Page {i + 1}")[:80],
+                "width": round(page_rect.width, 2),
+                "height": round(page_rect.height, 2),
+                "rotation": page.rotation,
+            })
+        result["pages"] = pages_info
+    elif not light_mode and total_pages > max_pages:
+        # Return partial page info to avoid timeout/memory issues
+        logger.info(f"PDF has {total_pages} pages (exceeds max_pages={max_pages}). Returning partial page list.")
+        result["partial_page_scan"] = True
+        result["partial_scan_count"] = max_pages
+        result["pages"] = _get_partial_page_info(doc, max_pages)
+    
+    # Clean up empty metadata fields for clarity
+    result["metadata"] = {k: v for k, v in result["metadata"].items() if v is not None or k == "title"}
+    _safe_close_doc(doc)
+    return result
+
+
+def _get_partial_page_info(doc: fitz.Document, limit: int) -> list[dict]:
+    """Get page info for first N pages."""
+    meta = doc.metadata or {}
+    pages = []
+    for i in range(min(limit, len(doc))):
+        page = doc[i]
+        page_rect = page.rect
+        pages.append({
+            "page_number": i + 1,
+            "title": (meta.get("title") or f"Page {i + 1}")[:80],
+            "width": round(page_rect.width, 2),
+            "height": round(page_rect.height, 2),
+            "rotation": page.rotation,
+        })
+    return pages
 
 
 @pdf_router.post(
@@ -75,123 +203,134 @@ async def pdf_extract_endpoint(
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
-    data_bytes = _read_pdf(file)
-    ok, msg = validate_file_size(data_bytes, MAX_FILE_SIZE_MB)
-    if not ok:
-        raise HTTPException(status_code=400, detail=msg)
+    # Detect large uploads and stream to temp file for memory efficiency
+    raw_cl = file.headers.get("content-length")
+    cl_val = int(raw_cl) if raw_cl else 0
+    is_large = cl_val > 50 * 1024 * 1024
+    pdf_source_path: Optional[str] = None
+    data_bytes: Optional[bytes] = None
 
-    t_start = time.perf_counter()
+    try:
+        if is_large:
+            fd, pdf_source_path = tempfile.mkstemp(suffix=".pdf")
+            size = 0
+            with os.fdopen(fd, "wb") as f:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    size += len(chunk)
+        else:
+            data_bytes = await _read_pdf(file)
+            ok, msg = validate_file_size(data_bytes, MAX_FILE_SIZE_MB)
+            if not ok:
+                raise HTTPException(status_code=400, detail=msg)
 
-    from task_queue.interrupt import get_interrupt_tracker
-    from services.websocket_manager import get_ws_manager as _get_ws_manager
+        t_start = time.perf_counter()
 
-    tracker = get_interrupt_tracker()
-    ws_manager = _get_ws_manager()
-    effective_task_id = task_id if task_id else f"pdf_extract_{int(time.time())}"
-    interrupt_event = tracker.create_interrupt(effective_task_id)
-    await asyncio.sleep(0)  # Yield control so immediate cancellation can take effect
+        from task_queue.interrupt import get_interrupt_tracker
+        from services.websocket_manager import get_ws_manager as _get_ws_manager
 
-    total_pages = fitz.open(stream=data_bytes, filetype="pdf")
-    pg_start = from_page
-    pg_end = to_page if to_page is not None else total_pages.__len__()
-    pg_start = max(1, pg_start)
-    pg_end = min(pg_end, total_pages.__len__())
+        tracker = get_interrupt_tracker()
+        ws_manager = _get_ws_manager()
+        effective_task_id = task_id if task_id else f"pdf_extract_{int(time.time())}"
+        interrupt_event = tracker.create_interrupt(effective_task_id)
+        await asyncio.sleep(0)
 
-    # Register with progress tracker
-    prog_tracker = get_progress_tracker()
-    prog = prog_tracker.register(effective_task_id, total_pages=pg_end - pg_start + 1)
+        # Get page count using file path for large files (memory efficient)
+        if pdf_source_path:
+            temp_doc = fitz.open(pdf_source_path, filetype="pdf")
+        else:
+            temp_doc = fitz.open(stream=data_bytes, filetype="pdf")  # type: ignore
+        total_pages = len(temp_doc)
+        _safe_close_doc(temp_doc)
+        pg_start = max(1, from_page)
+        pg_end = min(to_page if to_page is not None else total_pages, total_pages)
 
-    loop = asyncio.get_running_loop()
+        if pg_start > total_pages:
+            raise HTTPException(status_code=400, detail=f"'From' page ({from_page}) exceeds total pages ({total_pages}).")
+        if pg_start > pg_end:
+            pg_start, pg_end = 1, total_pages
 
-    tw = THUMB_WIDTH
-    th = THUMB_HEIGHT
+        prog_tracker = get_progress_tracker()
+        prog = prog_tracker.register(effective_task_id, total_pages=pg_end - pg_start + 1)
 
-    def _render_page(doc, index):
-        page = doc[index]
-        pix = page.get_pixmap(dpi=dpi)
-        width, height = pix.width, pix.height
-        img_bytes = pix.tobytes("png")
+        loop = asyncio.get_running_loop()
+        tw = THUMB_WIDTH
+        th = THUMB_HEIGHT
 
-        # Generate thumbnail
-        import io as _io
-        from PIL import Image as _Image
-        thumb_pix = page.get_pixmap(dpi=dpi)
-        img = _Image.frombytes("RGB", [thumb_pix.width, thumb_pix.height], thumb_pix.samples)
-        img = img.resize((tw, th), _Image.Resampling.LANCZOS)
-        thumb_buf = _io.BytesIO()
-        img.save(thumb_buf, format="PNG")
-        import base64 as _b64
-        thumb_entry = {
-            "thumb_image_b64": _b64.b64encode(thumb_buf.getvalue()).decode("utf-8"),
-            "thumb_width": tw,
-            "thumb_height": th,
-        }
+        # Open PDF — use file path for large files (avoids loading into RAM)
+        doc = fitz.open(pdf_source_path, filetype="pdf") if pdf_source_path else fitz.open(stream=data_bytes, filetype="pdf")
 
-        return width, height, img_bytes, thumb_entry
-
-    pages_out = []
-    for i in range(pg_start - 1, pg_end):
-        # Check cancellation before each page (runs on event loop thread)
-        if interrupt_event.is_set():
-            total_pages.close()
-            tracker.remove(effective_task_id)
-            return JSONResponse({
-                "filename": file.filename,
-                "total_pages_extracted": len(pages_out),
-                "dpi": dpi,
+        def _render_page(doc_obj: fitz.Document, index: int):
+            page = doc_obj[index]
+            pix = page.get_pixmap(dpi=dpi)
+            width, height = pix.width, pix.height
+            img_bytes = pix.tobytes("png")
+            import io as _io
+            from PIL import Image as _Image
+            thumb_pix = page.get_pixmap(dpi=dpi)
+            img = _Image.frombytes("RGB", [thumb_pix.width, thumb_pix.height], thumb_pix.samples)
+            img = img.resize((tw, th), _Image.Resampling.LANCZOS)
+            thumb_buf = _io.BytesIO()
+            img.save(thumb_buf, format="PNG")
+            import base64 as _b64
+            return width, height, img_bytes, {
+                "thumb_image_b64": _b64.b64encode(thumb_buf.getvalue()).decode("utf-8"),
                 "thumb_width": tw,
                 "thumb_height": th,
-                "status": "cancelled",
-                "message": "Extraction was stopped by user.",
-                "pages": pages_out,
-            })
-
-        # Run blocking PyMuPDF work off the event loop thread so cancellation can be processed
-        width, height, img_bytes, thumb_entry = await loop.run_in_executor(None, _render_page, total_pages, i)
-        import base64 as _b64
-        b64 = _b64.b64encode(img_bytes).decode("utf-8")
-        page_entry = {
-            "page_number": i + 1,
-            "width": width,
-            "height": height,
-            "image_b64": b64,
-            **thumb_entry,
-        }
-        pages_out.append(page_entry)
-        # Update progress tracker after each page
-        prog_tracker.update_page(effective_task_id, len(pages_out), (time.perf_counter() - t_start) * 1000 / max(len(pages_out), 1))
-        # Broadcast progress to WebSocket subscribers (use send_text so browser receives string data)
-        await ws_manager.broadcast_to_task(
-            effective_task_id,
-            {
-                "type": "live_pdf",
-                "data": {
-                    "pages_completed": len(pages_out),
-                    "total_pages": pg_end - pg_start + 1,
-                    "percentage": round(len(pages_out) / (pg_end - pg_start + 1) * 100, 1),
-                }
             }
-        )
 
-    tracker.remove(effective_task_id)
-    prog_tracker.remove(effective_task_id)
+        pages_out = []
+        for i in range(pg_start - 1, pg_end):
+            if interrupt_event.is_set():
+                doc.close()
+                tracker.remove(effective_task_id)
+                return JSONResponse({
+                    "filename": file.filename, "total_pages_extracted": len(pages_out),
+                    "dpi": dpi, "thumb_width": tw, "thumb_height": th,
+                    "status": "cancelled", "message": "Extraction was stopped by user.",
+                    "pages": pages_out,
+                })
+            width, height, img_bytes, thumb_entry = await loop.run_in_executor(None, _render_page, doc, i)
+            import base64 as _b64
+            page_entry = {
+                "page_number": i + 1, "width": width, "height": height,
+                "image_b64": _b64.b64encode(img_bytes).decode("utf-8"), **thumb_entry,
+            }
+            pages_out.append(page_entry)
+            prog_tracker.update_page(effective_task_id, len(pages_out), (time.perf_counter() - t_start) * 1000 / max(len(pages_out), 1))
+            await ws_manager.broadcast_to_task(
+                effective_task_id,
+                {"type": "live_pdf", "data": {
+                    "pages_completed": len(pages_out), "total_pages": pg_end - pg_start + 1,
+                    "percentage": round(len(pages_out) / (pg_end - pg_start + 1) * 100, 1),
+                }},
+            )
 
-    # Record per-API metrics
-    metrics = get_metrics()
-    latency_ms = (time.perf_counter() - t_start) * 1000
-    metrics.latency_pdf.record(latency_ms)
-    metrics.api_pdf.record_success(files=len(pages_out))
-    metrics.total_requests.inc()
+        tracker.remove(effective_task_id)
+        prog_tracker.remove(effective_task_id)
+        doc.close()
 
-    return JSONResponse({
-        "task_id": effective_task_id,
-        "filename": file.filename,
-        "total_pages_extracted": len(pages_out),
-        "dpi": dpi,
-        "thumb_width": tw,
-        "thumb_height": th,
-        "pages": pages_out,
-    })
+        metrics = get_metrics()
+        latency_ms = (time.perf_counter() - t_start) * 1000
+        metrics.latency_pdf.record(latency_ms)
+        metrics.api_pdf.record_success(files=len(pages_out))
+        metrics.total_requests.inc()
+
+        return JSONResponse({
+            "task_id": effective_task_id, "filename": file.filename,
+            "total_pages_extracted": len(pages_out), "dpi": dpi,
+            "thumb_width": tw, "thumb_height": th, "pages": pages_out,
+        })
+
+    finally:
+        if pdf_source_path and os.path.exists(pdf_source_path):
+            try:
+                os.unlink(pdf_source_path)
+            except Exception:
+                pass
 
 
 @pdf_router.post(
@@ -207,7 +346,7 @@ async def pdf_reconstruct_endpoint(
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
-    data_bytes = _read_pdf(file)
+    data_bytes = await _read_pdf(file)
     ok, msg = validate_file_size(data_bytes, MAX_FILE_SIZE_MB)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
@@ -247,25 +386,48 @@ async def pdf_ocr_endpoint(
     conf_threshold: float = Form(0.2),
     img_size: int = Form(1280),
     text_cleaning: str = Form("true"),
-    task_id: str = Form(""),  # Allow frontend to pass its own task_id for cancellation
-    use_cache: str = Form("false"),  # Enable result caching
-    device: str = Form(""),  # Override device (cpu/cuda)
-    det_type: str = Form(""),  # Detection type: yolo, detr, mllm
-    det_conf: float | None = Form(None),  # Detection confidence threshold
-    mllm_model: str = Form(""),  # MLLM model name
-    layout_analysis: str = Form("false"),  # Enable layout analysis
-    post_processing: str = Form(""),  # Post-processing pipeline
-    preprocess_options: str = Form(""),  # JSON-encoded preprocessing options
+    task_id: str = Form(""),
+    use_cache: str = Form("false"),
+    device: str = Form(""),
+    det_type: str = Form(""),
+    det_conf: float | None = Form(None),
+    mllm_model: str = Form(""),
+    layout_analysis: str = Form("false"),
+    post_processing: str = Form(""),
+    preprocess_options: str = Form(""),
 ):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
     load_models()
 
-    data_bytes = _read_pdf(file)
-    ok, msg = validate_file_size(data_bytes, MAX_FILE_SIZE_MB)
-    if not ok:
-        raise HTTPException(status_code=400, detail=msg)
+    # Detect large uploads and stream to temp file for memory efficiency
+    raw_cl = file.headers.get("content-length")
+    cl_val = int(raw_cl) if raw_cl else 0
+    is_large = cl_val > 50 * 1024 * 1024
+    pdf_source_path: Optional[str] = None
+    data_bytes: Optional[bytes] = None
+
+    try:
+        if is_large:
+            fd, pdf_source_path = tempfile.mkstemp(suffix=".pdf")
+            size = 0
+            with os.fdopen(fd, "wb") as f:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    size += len(chunk)
+        else:
+            data_bytes = await _read_pdf(file)
+            ok, msg = validate_file_size(data_bytes, MAX_FILE_SIZE_MB)
+            if not ok:
+                raise HTTPException(status_code=400, detail=msg)
+
+    except Exception as e:
+        logger.error(f"Failed to read file: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
 
     from services.ocr_service import OCRService
     ocr_svc = OCRService()
@@ -317,13 +479,27 @@ async def pdf_ocr_endpoint(
 
     loop = asyncio.get_running_loop()
 
-    # Determine page range
-    import fitz as _fitz
-    temp_doc = _fitz.open(stream=io.BytesIO(data_bytes), filetype="pdf")
+    # Determine page range — use temp file for large PDFs (memory efficient)
+    if pdf_source_path:
+        temp_doc = fitz.open(pdf_source_path, filetype="pdf")
+    else:
+        temp_doc = fitz.open(stream=data_bytes, filetype="pdf")  # type: ignore
     total_pdf_pages = len(temp_doc)
     pg_start = max(1, from_page)
     pg_end = min(to_page if to_page is not None else total_pdf_pages, total_pdf_pages)
-    temp_doc.close()
+
+    # Clamp page range to actual PDF length to prevent empty loops and silent failures
+    if pg_start > total_pdf_pages:
+        _safe_close_doc(temp_doc)
+        raise HTTPException(status_code=400, detail=f"'From' page ({from_page}) exceeds total pages ({total_pdf_pages}).")
+    if pg_end > total_pdf_pages:
+        pg_end = total_pdf_pages
+
+    # Adjust pg_start if it ended up beyond clamped pg_end (e.g., user typed 'to' less than 'from')
+    if pg_start > pg_end:
+        pg_start, pg_end = 1, total_pdf_pages
+
+    _safe_close_doc(temp_doc)
 
     # Register with progress tracker and get ws_manager
     prog_tracker = get_progress_tracker()
@@ -333,6 +509,13 @@ async def pdf_ocr_endpoint(
 
     results = []
     total_lines = 0
+
+    # Read PDF bytes (needed by OCRService — loads from temp file if large upload)
+    if pdf_source_path:
+        with open(pdf_source_path, "rb") as f:
+            pdf_bytes_for_ocr = f.read()
+    else:
+        pdf_bytes_for_ocr = data_bytes  # type: ignore
 
     # Per-page timeout (30 minutes) to prevent infinite hangs on corrupted pages.
     PAGE_TIMEOUT = 1800
@@ -394,12 +577,12 @@ async def pdf_ocr_endpoint(
                     conf_threshold=conf_threshold,
                     img_size=img_size,
                     text_cleaning=clean_opts,
-                    interrupt_event=None,  # already checked externally
+                    interrupt_event=interrupt_event,  # Pass so cancellation works mid-page
                     **advanced,
                 )
 
             try:
-                page_results = await _ocr_page_async(data_bytes, current_page_num)
+                page_results = await _ocr_page_async(pdf_bytes_for_ocr, current_page_num)
             except asyncio.TimeoutError:
                 logger.error(f"Page {current_page_num}: OCR timed out after {PAGE_TIMEOUT}s — skipping.")
                 results.append(OCRResult(
@@ -466,10 +649,8 @@ async def pdf_ocr_endpoint(
         })
 
     except KeyboardInterrupt as e:
-        # Task was cancelled mid-way
         prog_tracker.remove(effective_task_id)
         tracker.remove(effective_task_id)
-        # Return partial results so frontend can display progress
         return JSONResponse(
             status_code=200,
             content={
@@ -482,6 +663,12 @@ async def pdf_ocr_endpoint(
                 "pages": results,
             },
         )
+    finally:
+        if pdf_source_path and os.path.exists(pdf_source_path):
+            try:
+                os.unlink(pdf_source_path)
+            except Exception:
+                pass
 
 
 # ── Progress Endpoint ────────────────────────────────────────

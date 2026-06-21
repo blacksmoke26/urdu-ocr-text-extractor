@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import io
+import os
 import time
-from typing import Optional
+from typing import Optional  # noqa: F401
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Query
 from fastapi.responses import JSONResponse

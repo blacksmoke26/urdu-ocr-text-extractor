@@ -290,6 +290,27 @@ def text_recognizer(img_cropped, model, converter, device):
     preds_size = torch.IntTensor([preds.size(1)] * batch_size)
     _, preds_index = preds.max(2)
     preds_str = converter.decode(preds_index.data, preds_size.data)[0]
+    
+    # Ensure output is valid Unicode — replace any invalid/surrogate characters
+    try:
+        preds_str.encode('utf-8').decode('utf-8')  # Validates encoding
+        if '\ufffd' in preds_str:  # Unicode replacement character indicates corruption
+            # Re-decode more carefully, skipping unknown indices
+            chars = []
+            for i in range(len(preds_index[0])):
+                idx = int(preds_index[0][i])
+                if 0 < idx < len(converter.character) and i < preds_size[0]:
+                    ch = converter.character[idx]
+                    # Skip non-printable/surrogate
+                    cp = ord(ch)
+                    if cp > 0x10FFFF or (0xD800 <= cp <= 0xDFFF):
+                        continue
+                    chars.append(ch)
+            preds_str = "".join(chars)
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        # Fallback: sanitize to valid Unicode
+        preds_str = preds_str.encode('utf-8', errors='replace').decode('utf-8')
+    
     return preds_str
 
 

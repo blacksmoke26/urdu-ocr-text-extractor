@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger("pdf_service")
 
 import fitz  # PyMuPDF
 from PIL import Image
@@ -64,37 +67,89 @@ class PDFService:
         return pages
 
     @staticmethod
-    def get_info(pdf_data: bytes) -> dict:
-        """Get PDF metadata."""
+    def get_info(pdf_data: bytes, light_mode: bool = True, max_pages: int = 500) -> dict:
+        """Get PDF metadata with optional light mode for large files.
+        
+        Args:
+            pdf_data: Raw PDF bytes
+            light_mode: If True, skip per-page scanning (faster, less memory)
+            max_pages: Max pages to scan in full mode
+        """
         doc = fitz.open(stream=pdf_data, filetype="pdf")
         total_pages = len(doc)
 
         info_obj = doc.metadata or {}
 
-        pages_info = []
-        for i in range(total_pages):
-            page = doc[i]
-            pix = page.get_pixmap(dpi=72)
-            pages_info.append({
-                "page_number": i + 1,
-                "title": info_obj.get("title", f"Page {i + 1}")[:80],
-                "width": pix.width,
-                "height": pix.height,
-                "rotation": page.rotation,
-            })
+        result: dict = {
+            "total_pages": total_pages,
+            "file_size_bytes": len(pdf_data),
+            "metadata": {
+                "title": (info_obj.get("title") or "").strip() or None,
+                "author": (info_obj.get("author") or "").strip() or None,
+                "subject": (info_obj.get("subject") or "").strip() or None,
+                "creator": (info_obj.get("creator") or "").strip() or None,
+                "producer": (info_obj.get("producer") or "").strip() or None,
+            },
+        }
+
+        if not light_mode and total_pages <= max_pages:
+            pages_info = []
+            for i in range(total_pages):
+                page = doc[i]
+                # Use rect instead of pixmap — no rendering needed for dimensions
+                page_rect = page.rect
+                pages_info.append({
+                    "page_number": i + 1,
+                    "title": (info_obj.get("title") or f"Page {i + 1}")[:80],
+                    "width": round(page_rect.width, 2),
+                    "height": round(page_rect.height, 2),
+                    "rotation": page.rotation,
+                })
+            result["pages"] = pages_info
+        elif not light_mode and total_pages > max_pages:
+            # Return partial info for very large PDFs
+            logger.info(f"PDF has {total_pages} pages (exceeds max_pages={max_pages}). Returning partial page list.")
+            result["partial_page_scan"] = True
+            result["partial_scan_count"] = max_pages
+            result["pages"] = PDFService._get_partial_page_info_from_doc(doc, max_pages)
+        
+        # Clean up empty metadata fields
+        result["metadata"] = {k: v for k, v in result["metadata"].items() if v is not None or k == "title"}
+        _safe_close_doc(pdf_data) if hasattr(pdf_data, 'close') else None
         doc.close()
 
-        return {
-            "total_pages": total_pages,
-            "metadata": {
-                "title": info_obj.get("title", ""),
-                "author": info_obj.get("author", ""),
-                "subject": info_obj.get("subject", ""),
-                "creator": info_obj.get("creator", ""),
-                "producer": info_obj.get("producer", ""),
-            },
-            "pages": pages_info,
-        }
+        return result
+
+    @staticmethod
+    def get_info_light(pdf_data: bytes, light_mode: bool = True, max_pages: int = 500) -> dict:
+        """Lightweight version that skips rendering — just reads metadata."""
+        return PDFService.get_info(pdf_data, light_mode=light_mode, max_pages=max_pages)
+
+    @staticmethod
+    def _get_partial_page_info_from_doc(doc: fitz.Document, limit: int) -> list[dict]:
+        """Get page info for first N pages without rendering."""
+        info_obj = doc.metadata or {}
+        pages = []
+        for i in range(min(limit, len(doc))):
+            page = doc[i]
+            page_rect = page.rect
+            pages.append({
+                "page_number": i + 1,
+                "title": (info_obj.get("title") or f"Page {i + 1}")[:80],
+                "width": round(page_rect.width, 2),
+                "height": round(page_rect.height, 2),
+                "rotation": page.rotation,
+            })
+        return pages
+
+    @staticmethod
+    def _safe_close_doc(doc_obj) -> None:
+        """Safely close a document-like object."""
+        try:
+            if hasattr(doc_obj, 'close') and not getattr(doc_obj, 'is_closed', False):
+                doc_obj.close()
+        except Exception:
+            pass
 
     @staticmethod
     def reconstruct(pdf_data: bytes, from_page: int = 1, to_page: Optional[int] = None) -> tuple[bytes, str]:
