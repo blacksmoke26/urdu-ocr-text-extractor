@@ -439,46 +439,6 @@ async def pdf_ocr_endpoint(
     await asyncio.sleep(0)  # Yield control so immediate cancellation can take effect
     t_start = time.perf_counter()
 
-    # Parse text_cleaning
-    if text_cleaning == "false":
-        clean_opts = False
-    elif text_cleaning == "true":
-        clean_opts = True
-    else:
-        import json as _json
-        try:
-            clean_opts = _json.loads(text_cleaning)
-        except Exception:
-            clean_opts = True
-
-    # Parse advanced options
-    advanced: dict = {}
-    if use_cache and use_cache.lower() == "true":
-        advanced["use_cache"] = True
-    if device:
-        advanced["device"] = device
-    if det_type:
-        advanced["det_type"] = det_type
-    if det_conf is not None:
-        advanced["det_conf"] = float(det_conf)
-    if mllm_model:
-        advanced["mllm_model"] = mllm_model
-    if layout_analysis and layout_analysis.lower() == "true":
-        advanced["layout_analysis"] = True
-    if post_processing:
-        advanced["post_processing"] = post_processing
-    if preprocess_options:
-        try:
-            import json as _json2
-            advanced["preprocess_options"] = _json2.loads(preprocess_options)
-        except Exception:
-            pass  # Ignore invalid JSON
-
-    tw = THUMB_WIDTH
-    th = THUMB_HEIGHT
-
-    loop = asyncio.get_running_loop()
-
     # Determine page range — use temp file for large PDFs (memory efficient)
     if pdf_source_path:
         temp_doc = fitz.open(pdf_source_path, filetype="pdf")
@@ -507,6 +467,21 @@ async def pdf_ocr_endpoint(
     ws_manager = _get_ws_manager()
     prog = prog_tracker.register(effective_task_id, total_pages=pg_end - pg_start + 1)
 
+    # Parse text_cleaning
+    if text_cleaning == "false":
+        clean_opts = False
+    elif text_cleaning == "true":
+        clean_opts = True
+    else:
+        import json as _json
+        try:
+            clean_opts = _json.loads(text_cleaning)
+        except Exception:
+            clean_opts = True
+
+    # Parse advanced options for cache
+    use_cache_bool = use_cache.lower() == "true" if use_cache else False
+
     results = []
     total_lines = 0
 
@@ -519,115 +494,117 @@ async def pdf_ocr_endpoint(
 
     # Per-page timeout (30 minutes) to prevent infinite hangs on corrupted pages.
     PAGE_TIMEOUT = 1800
-    # Overall task timeout (4 hours)
-    OVERALL_TIMEOUT = 14400
-
-    async def _ocr_page_async(doc_bytes, pnum):
-        """Wrapper that enforces per-page timeout."""
-        return await asyncio.wait_for(
-            loop.run_in_executor(None, _ocr_page, doc_bytes, pnum),
-            timeout=PAGE_TIMEOUT,
-        )
-
-    overall_start = time.perf_counter()
 
     try:
-        for i in range(pg_start - 1, pg_end):
-            current_page_num = i + 1
-            # Check cancellation before each page
+        num_pages = pg_end - pg_start + 1
+
+        # ── Parallel page processing using ThreadPoolExecutor ──
+        # Each page OCR is CPU-bound (PyTorch numpy), and GIL releases during inference.
+        # Processing 2 pages concurrently roughly halves total time for PDFs with many pages.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from config import MAX_PARALLEL_PAGES
+        max_workers = min(MAX_PARALLEL_PAGES, num_pages)
+
+        # Pre-extract page numbers so we can process them in any order
+        page_numbers = list(range(pg_start - 1, pg_end))
+
+        def _process_single_page(pnum):
+            """Process one PDF page (runs inside thread pool worker)."""
+            # Check interrupt
             if interrupt_event.is_set():
-                prog_tracker.remove(effective_task_id)
-                tracker.remove(effective_task_id)
-                return JSONResponse({
-                    "task_id": effective_task_id,
-                    "filename": file.filename,
-                    "status": "cancelled",
-                    "message": "OCR process was stopped by user.",
-                    "total_pages": len(results),
-                    "total_text_lines": total_lines,
-                    "pages": results,
-                })
+                raise KeyboardInterrupt(f"Interrupted before page {pnum + 1}")
 
-            # Yield control so cancellation can be processed on the event loop
-            if i > pg_start - 1:
-                await asyncio.sleep(0)
-
-            # Check overall timeout
-            elapsed = time.perf_counter() - overall_start
-            if elapsed > OVERALL_TIMEOUT:
-                return JSONResponse({
-                    "task_id": effective_task_id,
-                    "filename": file.filename,
-                    "status": "timeout",
-                    "message": f"Overall processing exceeded {OVERALL_TIMEOUT // 60} minutes. Processed {len(results)}/{pg_end - pg_start + 1} pages.",
-                    "total_pages": len(results),
-                    "total_text_lines": total_lines,
-                    "pages": results,
-                })
-
-            # Run blocking OCR for this single page off the event loop thread
-            page_t = time.perf_counter()
-
-            def _ocr_page(doc_bytes, pnum):
-                return ocr_svc.ocr_pdf_pages(
-                    pdf_data=io.BytesIO(doc_bytes),
+            start = time.perf_counter()
+            try:
+                page_results = ocr_svc.ocr_pdf_pages(
+                    pdf_data=io.BytesIO(pdf_bytes_for_ocr),
                     filename=file.filename,
-                    from_page=pnum,
-                    to_page=pnum,
+                    from_page=pnum + 1,  # fitz uses 1-based page numbers
+                    to_page=pnum + 1,
                     conf_threshold=conf_threshold,
                     img_size=img_size,
                     text_cleaning=clean_opts,
-                    interrupt_event=interrupt_event,  # Pass so cancellation works mid-page
-                    **advanced,
+                    interrupt_event=None,  # already checked above
+                    use_cache=use_cache_bool,
+                    generate_thumbnails=False,  # thumbnails not needed for speed
                 )
+                elapsed = (time.perf_counter() - start) * 1000
+                return [(pnum + 1, page_results, elapsed)]
+            except Exception as e:
+                logger.error(f"Page {pnum + 1}: OCR failed — skipping. Error: {e}")
+                elapsed = (time.perf_counter() - start) * 1000
+                return [(pnum + 1, None, elapsed)]  # Signal failure via None result
 
-            try:
-                page_results = await _ocr_page_async(pdf_bytes_for_ocr, current_page_num)
-            except asyncio.TimeoutError:
-                logger.error(f"Page {current_page_num}: OCR timed out after {PAGE_TIMEOUT}s — skipping.")
-                results.append(OCRResult(
-                    filename=f"{file.filename}_page_{current_page_num}", file_type="pdf_page", lines=[], full_text="",
-                    processing_time_ms=PAGE_TIMEOUT * 1000,
-                ))
-                # Update progress even on timeout so the UI doesn't hang
-                prog_tracker.update_page(effective_task_id, len(results), PAGE_TIMEOUT * 1000)
-                await ws_manager.broadcast_to_task(
-                    effective_task_id,
-                    {
-                        "type": "live_pdf",
-                        "data": {
-                            "pages_completed": len(results),
-                            "total_pages": pg_end - pg_start + 1,
-                            "percentage": round(len(results) / (pg_end - pg_start + 1) * 100, 1),
-                            "last_page_time_ms": PAGE_TIMEOUT * 1000,
-                        }
-                    }
-                )
-                continue
-
-            elapsed_page_ms = (time.perf_counter() - page_t) * 1000
-
-            for pr in page_results:
-                r = pr.to_dict()
-                r["page_number"] = current_page_num
-                results.append(r)
-                total_lines += r.get("detected_lines", 0)
-
-            # Update progress tracker with completed pages count
-            prog_tracker.update_page(effective_task_id, len(results), elapsed_page_ms)
-            # Broadcast progress to WebSocket subscribers (use send_text so browser receives string data)
-            await ws_manager.broadcast_to_task(
-                effective_task_id,
-                {
-                    "type": "live_pdf",
-                    "data": {
-                        "pages_completed": len(results),
-                        "total_pages": pg_end - pg_start + 1,
-                        "percentage": round(len(results) / (pg_end - pg_start + 1) * 100, 1),
-                        "last_page_time_ms": elapsed_page_ms,
-                    }
-                }
-            )
+        # Use ThreadPoolExecutor for parallel processing
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_page = {executor.submit(_process_single_page, p): p for p in page_numbers}
+            for future in as_completed(future_to_page):
+                # Check cancellation before collecting results
+                if interrupt_event.is_set():
+                    break
+                page_num_from_idx = future_to_page[future]
+                try:
+                    page_results_list = future.result(timeout=PAGE_TIMEOUT)
+                    for pnum, pr_list, elapsed_ms in page_results_list:
+                        # Check cancellation per-page result
+                        if interrupt_event.is_set():
+                            break
+                        if pr_list is None:
+                            # Failed page — add placeholder
+                            results.append({
+                                "filename": f"{file.filename}_page_{pnum}",
+                                "file_type": "pdf_page",
+                                "status": "error",
+                                "page_number": pnum,
+                                "detected_lines": 0,
+                                "full_text": "",
+                                "lines": [],
+                                "processing_time_ms": elapsed_ms,
+                            })
+                        else:
+                            for pr in pr_list:
+                                r = pr.to_dict()
+                                r["page_number"] = pnum
+                                results.append(r)
+                                total_lines += r.get("detected_lines", 0)
+                        # Update progress after each completed page
+                        prog_tracker.update_page(effective_task_id, len(results), elapsed_ms)
+                        await ws_manager.broadcast_to_task(
+                            effective_task_id,
+                            {
+                                "type": "live_pdf",
+                                "data": {
+                                    "pages_completed": len(results),
+                                    "total_pages": num_pages,
+                                    "percentage": round(len(results) / num_pages * 100, 1),
+                                    "last_page_time_ms": elapsed_ms,
+                                }
+                            }
+                        )
+                except asyncio.TimeoutError:
+                    logger.error(f"Page {page_num_from_idx + 1}: OCR timed out after {PAGE_TIMEOUT}s — skipping.")
+                    results.append({
+                        "filename": f"{file.filename}_page_{page_num_from_idx + 1}",
+                        "file_type": "pdf_page",
+                        "status": "error",
+                        "page_number": page_num_from_idx + 1,
+                        "detected_lines": 0,
+                        "full_text": "",
+                        "lines": [],
+                        "processing_time_ms": PAGE_TIMEOUT * 1000,
+                    })
+                except Exception as e:
+                    logger.error(f"Page {page_num_from_idx + 1}: unexpected error — {e}")
+                    results.append({
+                        "filename": f"{file.filename}_page_{page_num_from_idx + 1}",
+                        "file_type": "pdf_page",
+                        "status": "error",
+                        "page_number": page_num_from_idx + 1,
+                        "detected_lines": 0,
+                        "full_text": "",
+                        "lines": [],
+                        "processing_time_ms": 0,
+                    })
 
         # All pages completed successfully
         metrics = get_metrics()
@@ -643,8 +620,8 @@ async def pdf_ocr_endpoint(
             "filename": file.filename,
             "total_pages": len(results),
             "total_text_lines": total_lines,
-            "thumb_width": tw,
-            "thumb_height": th,
+            "thumb_width": THUMB_WIDTH,
+            "thumb_height": THUMB_HEIGHT,
             "pages": results,
         })
 

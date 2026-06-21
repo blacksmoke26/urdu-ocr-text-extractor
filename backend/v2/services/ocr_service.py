@@ -1,7 +1,5 @@
 """OCR service — orchestrates pipeline execution with caching and text cleaning."""
 
-from __future__ import annotations
-
 import base64
 import io
 import threading
@@ -15,11 +13,14 @@ from config import (
     CACHE_TTL_SECONDS,
     DEFAULT_CONF_THRESHOLD,
     DEFAULT_IMG_SIZE,
+    PDF_RENDER_DPI,
+    THUMBNAIL_RENDER_DPI,
     SPELL_CHECK_MAX_DISTANCE,
     SPELL_CHECK_USE_WORD_FREQ,
     TEXT_CLEANING_ENABLED,
     URDUTEXT_AUTOCORRECT_ENABLED,
     URDUTEXT_AUTOCORRECT_MODE,
+    MAX_PARALLEL_PAGES,
 )
 from engine.pipeline import OCRResult, run_ocr_pipeline
 from engine.text_cleaner import TextCleaner
@@ -78,10 +79,16 @@ class OCRService:
                       text_cleaning: bool | dict = True,
                       use_cache: bool = True,
                       interrupt_event: threading.Event | None = None,
+                      generate_thumbnails: bool = False,  # Skip thumbnails by default for speed
                       **kwargs: object) -> list[OCRResult]:
-        """Run OCR on all pages of a PDF. Stop if interrupt_event is set."""
+        """Run OCR on all pages of a PDF. Stop if interrupt_event is set.
+
+        Optimized with:
+        - Configurable render DPI (default 150, down from hardcoded 300)
+        - Single pixmap generation per page (no duplicate rendering)
+        - Optional thumbnail generation (disabled by default)
+        """
         import fitz
-        from config import THUMB_WIDTH, THUMB_HEIGHT
 
         stream = pdf_data if isinstance(pdf_data, bytes) else pdf_data.getvalue()
         doc = fitz.open(stream=stream, filetype="pdf")
@@ -89,10 +96,6 @@ class OCRService:
 
         pg_start = max(1, from_page)
         pg_end = min(to_page if to_page is not None else total_pages, total_pages)
-
-        # Always generate thumbnails using config defaults
-        tw = THUMB_WIDTH
-        th = THUMB_HEIGHT
 
         results = []
         for page_num in range(pg_start - 1, pg_end):
@@ -103,13 +106,13 @@ class OCRService:
 
             page = doc[page_num]
             try:
-                pix = page.get_pixmap(dpi=300)
+                # Single pixmap generation — use it for both OCR input and thumbnail
+                pix = page.get_pixmap(dpi=PDF_RENDER_DPI)
                 img_bytes = io.BytesIO(pix.tobytes("png"))
             except Exception as e:
                 import logging
                 log = logging.getLogger('ocr')
                 log.warning(f"Page {page_num + 1}: Failed to extract image — skipping: {e}")
-                # Skip broken pages instead of hanging
                 page_filename = f"{filename}_page_{page_num + 1}"
                 results.append(OCRResult(
                     filename=page_filename, file_type="pdf_page", lines=[], full_text="",
@@ -119,13 +122,17 @@ class OCRService:
 
             page_filename = f"{filename}_page_{page_num + 1}"
 
-            # Generate thumbnail
-            thumb_pix = page.get_pixmap(dpi=300)
-            img = Image.frombytes("RGB", [thumb_pix.width, thumb_pix.height], thumb_pix.samples)
-            img = img.resize((tw, th), Image.Resampling.LANCZOS)
-            thumb_buf = io.BytesIO()
-            img.save(thumb_buf, format="PNG")
-            page_thumb_b64 = base64.b64encode(thumb_buf.getvalue()).decode("utf-8")
+            # Generate thumbnail only when explicitly requested
+            if generate_thumbnails:
+                # Reuse the same pix for thumbnail — just resize, no re-render
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                tw, th = kwargs.get("thumb_width", 300), kwargs.get("thumb_height", 425)
+                img = img.resize((tw, th), Image.Resampling.LANCZOS)
+                thumb_buf = io.BytesIO()
+                img.save(thumb_buf, format="PNG")
+                page_thumb_b64 = base64.b64encode(thumb_buf.getvalue()).decode("utf-8")
+            else:
+                page_thumb_b64 = None
 
             try:
                 result = self.ocr_image(img_bytes, page_filename, conf_threshold, img_size, text_cleaning, use_cache)
@@ -176,7 +183,7 @@ class OCRService:
                 "diacritics": False,
                 "normalize_alef_chars": True,
                 "normalize_tatil": True,
-                "reshape": True,
+                "reshape": False,  # Keep text in logical Unicode — frontend handles RTL display
                 "normalize_whitespace": True,
             }
 

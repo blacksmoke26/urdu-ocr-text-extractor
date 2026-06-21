@@ -69,8 +69,11 @@ API_KEYS: list[str] = [k.strip() for k in os.getenv("OCR_API_KEYS", "").split(",
 AUTH_ENABLED: bool = len(API_KEYS) > 0
 
 # ─── PDF Settings ─────────────────────────────────────────────
-PDF_DPI: int = int(os.getenv("OCR_PDF_DPI", "300"))
+PDF_DPI: int = int(os.getenv("OCR_PDF_DPI", "300"))                        # Legacy DPI (kept for compat)
+PDF_RENDER_DPI: int = int(os.getenv("OCR_PDF_RENDER_DPI", "150"))          # DPI used for OCR page rendering
+THUMBNAIL_RENDER_DPI: int = int(os.getenv("OCR_THUMBNAIL_DPI", "96"))       # DPI for thumbnail previews
 PDF_DEFAULT_START_PAGE: int = 1
+MAX_PARALLEL_PAGES: int = int(os.getenv("OCR_MAX_PARALLEL_PAGES", "2"))     # Parallel page processing workers
 
 # ─── Thumbnail Settings ────────────────────────────────────────
 THUMB_WIDTH: int = int(os.getenv("OCR_THUMB_WIDTH", "300"))
