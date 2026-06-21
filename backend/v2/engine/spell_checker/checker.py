@@ -46,6 +46,10 @@ CHAR_CONFUSIONS = {
 
     "\u06CC": "\u0626",  # ی (linking) -> ئ (non-linking)
     "\u0626": "\u06CC",  # ئ -> ی
+
+    # U+0621 ء (hamza) ↔ ی (yeh) — visually similar OCR confusion (ہوء → ہوئی)
+    "\u0621": "\u06CC",
+    "\u06CC": "\u0621",
 }
 
 # These are HIGH-COST confusions that should only apply when strongly validated.
@@ -72,6 +76,16 @@ PHONETIC_ALIASES = {
 _ALL_CONFUSIONS = {**CHAR_CONFUSIONS, **PHONETIC_ALIASES}
 # Note: HIGH_COST_CONFUSIONS are NOT merged into _ALL_CONFUSIONS
 # They require separate handling with higher validation threshold
+
+# ── Known OCR word-level error mappings ─────────────────────────
+# Words that ARE in the dictionary but are common OCR errors for
+# a different, contextually more likely word. Format: wrong_word -> correct_word.
+# These override the "already_valid" skip because the wrong form IS valid,
+# but it is almost certainly an OCR misread of the intended word.
+KNOWN_OCR_ERRORS: dict[str, str] = {
+    # دیکھو (look/see) often misread as دیوالہ by UTRNet
+    "دیوالہ": "دیکھو",
+}
 
 
 # ── Matra/Hamza/Extra Mark Characters ──────────────────────────
@@ -103,6 +117,7 @@ EXTRA_MARKS |= {
     "\u06D5",  # yeh with small vertical tail above (matra)
     "\u06D6",  # High hamza
     "\u06D7",  # Small v-shaped mark
+    "\u0620",  # Arabic Letter High Hamza Alif — OCR often substitutes this for matra/diacritic (e.g., امیدِیٰ)
 }
 
 
@@ -357,9 +372,10 @@ def _normalize_word(word: str) -> str:
     w = w.replace("\u0622", "\u0627")  # آ -> ا
     w = w.replace("\u0623", "\u0627")  # ء above -> ا  
     w = w.replace("\u0625", "\u0627")  # ء below -> ا
-    # Normalize yeh/kaf to standard Urdu forms
+    # Normalize yeh to standard Urdu form
     w = w.replace("\u064A", "\u06CC")  # Standard yeh -> Urdu yeh
-    w = w.replace("\u06A9", "\u0643")  # Persian kaf -> Arabic kaf (dictionary standard)
+    # NOTE: Do NOT normalize Persian/Urdu kaf (ک, U+06A9) to Arabic kaf (ك, U+0643).
+    # ک is a native Urdu letter and must be preserved as-is.
     return w
 
 
@@ -687,6 +703,16 @@ class UrduSpellChecker:
                 continue
             
             # Never correct if the original word is already valid (exact or canonical match)
+            # BUT check known OCR errors first — they override dictionary validity
+            if word in KNOWN_OCR_ERRORS:
+                words_with_spaces[i] = KNOWN_OCR_ERRORS[word]
+                corrections["applied"] += 1
+                corrections["words"].append({
+                    "from": word, "to": KNOWN_OCR_ERRORS[word], "pos": i,
+                    "confidence": 0.95,
+                    "reason": "known_ocr_error",
+                })
+                continue
             if word in self._all_words:
                 continue
             norm_w = _normalize_word(word)
@@ -877,6 +903,14 @@ class UrduSpellChecker:
         
         # Skip if already valid (exact match or canonical match)
         if word in self._all_words:
+            # But first check known OCR error mappings — these override dictionary validity
+            if word in KNOWN_OCR_ERRORS:
+                correction = KNOWN_OCR_ERRORS[word]
+                return correction, True, {
+                    "from": word, "to": correction,
+                    "confidence": 0.95,
+                    "reason": "known_ocr_error",
+                }
             return word, False, {"from": word, "to": word, "confidence": 1.0, "reason": "already_valid"}
         
         # Also check via canonical form — if norm(word) matches a dict entry, skip

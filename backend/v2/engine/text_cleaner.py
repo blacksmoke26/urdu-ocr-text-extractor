@@ -91,12 +91,20 @@ class TextCleaner:
 
     @staticmethod
     def reshape(text: str) -> str:
-        """Reshape Arabic script for correct visual rendering."""
+        """Reshape text for correct visual rendering.
+        
+        Uses arabic_reshaper with ligatures disabled to preserve Urdu-specific
+        characters (پ, چ, گ, ے, ڑ, ک) that would otherwise be converted to
+        their Arabic forms by the default reshaping config.
+        """
         if not _has_arabic_reshaper():
             return text
         try:
             import arabic_reshaper  # noqa: F401
-            return arabic_reshaper.reshape(text)
+            from arabic_reshaper import Config  # noqa: F401
+            # Disable ligatures to preserve Urdu Persian letters (ک, پ, چ, گ, ے, ڑ)
+            config = Config(ligatures=False)
+            return arabic_reshaper.reshape(text, configuration=config)
         except Exception:
             return text
 
@@ -181,12 +189,26 @@ class TextCleaner:
         return "".join(result), corrections
 
     @staticmethod
-    def autocorrect_dict(text: str) -> tuple[str, dict]:
+    def autocorrect_dict(text: str, spell_check_max_distance: Optional[int] = None,
+                         spell_check_use_word_freq: Optional[bool] = None) -> tuple[str, dict]:
         """Dictionary-based auto-correction using Levenshtein distance.
 
         Uses the urdu-dict word list for candidate generation and scoring.
         Returns (corrected_text, correction_stats).
         """
+        # Pass per-call config to spell checker
+        if spell_check_max_distance is not None or spell_check_use_word_freq is not None:
+            from engine.spell_checker import UrduSpellChecker  # noqa: F811
+            mode = os.environ.get("URDUTEXT_AUTOCORRECT_MODE", "hybrid").lower()
+            ngram_order = 2 if mode == "hybrid" else 1
+            TextCleaner._spell_checker = UrduSpellChecker(
+                max_distance=spell_check_max_distance if spell_check_max_distance is not None
+                else int(os.environ.get("SPELL_CHECK_MAX_DISTANCE", "3")),
+                use_word_freq=(spell_check_use_word_freq if spell_check_use_word_freq is not None
+                               else os.environ.get("SPELL_CHECK_USE_WORD_FREQ", "true").lower() == "true"),
+                ngram_order=ngram_order,
+                confidence_threshold=float(os.environ.get("SPELL_CHECK_CONFIDENCE_THRESHOLD", "0.35")),
+            )
         spell_checker = TextCleaner._ensure_spell_checker()
         corrected, stats = spell_checker.correct(text, mode="distance")  # type: ignore[attr-defined]
 
@@ -211,7 +233,8 @@ class TextCleaner:
         return corrected, transformed_stats
 
     @staticmethod
-    def autocorrect_context(text: str) -> tuple[str, dict]:
+    def autocorrect_context(text: str, spell_check_max_distance: Optional[int] = None,
+                            spell_check_use_word_freq: Optional[bool] = None) -> tuple[str, dict]:
         """Context-aware word-level auto-correction using hybrid mode.
 
         Combines: confusion map + Levenshtein dictionary lookup + n-gram context scoring.
@@ -219,6 +242,19 @@ class TextCleaner:
 
         Returns (corrected_text, correction_stats).
         """
+        # Pass per-call config to spell checker
+        if spell_check_max_distance is not None or spell_check_use_word_freq is not None:
+            from engine.spell_checker import UrduSpellChecker  # noqa: F811
+            mode = os.environ.get("URDUTEXT_AUTOCORRECT_MODE", "hybrid").lower()
+            ngram_order = 2 if mode == "hybrid" else 1
+            TextCleaner._spell_checker = UrduSpellChecker(
+                max_distance=spell_check_max_distance if spell_check_max_distance is not None
+                else int(os.environ.get("SPELL_CHECK_MAX_DISTANCE", "3")),
+                use_word_freq=(spell_check_use_word_freq if spell_check_use_word_freq is not None
+                               else os.environ.get("SPELL_CHECK_USE_WORD_FREQ", "true").lower() == "true"),
+                ngram_order=ngram_order,
+                confidence_threshold=float(os.environ.get("SPELL_CHECK_CONFIDENCE_THRESHOLD", "0.35")),
+            )
         spell_checker = TextCleaner._ensure_spell_checker()
         corrected, stats = spell_checker.correct(text, mode="hybrid")  # type: ignore[attr-defined]
 
@@ -250,7 +286,7 @@ class TextCleaner:
     @staticmethod
     def clean(text: str, diacritics: bool = False, normalize_alef_chars: bool = True,
               normalize_tatil: bool = True, reshape: bool = True,
-              normalize_whitespace: bool = True) -> str:
+              normalize_whitespace: bool = True, **kwargs) -> str:
         """Apply a full cleaning pipeline to extracted text."""
         if not text:
             return text
@@ -275,6 +311,8 @@ class TextCleaner:
         normalize_tatil: bool = True,
         reshape: bool = True,
         normalize_whitespace: bool = True,
+        spell_check_max_distance: Optional[int] = None,  # per-call override
+        spell_check_use_word_freq: Optional[bool] = None,  # per-call override
     ) -> tuple[str, dict]:
         """Apply cleaning + auto-correction pipeline.
 
@@ -300,9 +338,17 @@ class TextCleaner:
         if mode == "char":
             corrected, stats = TextCleaner.autocorrect_char(cleaned)
         elif mode == "distance":
-            corrected, stats = TextCleaner.autocorrect_dict(cleaned)
+            corrected, stats = TextCleaner.autocorrect_dict(
+                cleaned,
+                spell_check_max_distance=spell_check_max_distance,
+                spell_check_use_word_freq=spell_check_use_word_freq,
+            )
         elif mode in ("context", "hybrid"):
-            corrected, stats = TextCleaner.autocorrect_context(cleaned)
+            corrected, stats = TextCleaner.autocorrect_context(
+                cleaned,
+                spell_check_max_distance=spell_check_max_distance,
+                spell_check_use_word_freq=spell_check_use_word_freq,
+            )
         else:
             return cleaned, {}
 
