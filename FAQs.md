@@ -571,7 +571,7 @@ Yes! This is open source under MIT. Feel free to submit issues, feature requests
 
 ### Where do I report bugs?
 
-File an issue on the [GitHub repository](https://github.com/abdur75648/End-To-End-Urdu-OCR-WebApp) with:
+File an issue on the [GitHub repository](https://github.com/blacksmoke26/urdu-ocr-text-extractor) with:
 - Steps to reproduce
 - Input file (if possible)
 - Expected vs actual output
