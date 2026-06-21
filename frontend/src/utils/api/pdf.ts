@@ -56,6 +56,7 @@ export const pdfOcr = (
   onProgress?: (pct: number) => void,
   taskId?: string,
   advancedOptions?: PdfOcrOptions,
+  signal?: AbortSignal,
 ): Promise<PdfOcrResponse> => {
   const formData: Record<string, string | number | boolean> = {
     from_page: fromPage,
@@ -85,7 +86,7 @@ export const pdfOcr = (
     formData.to_page = toPage;
   }
 
-  return upload<PdfOcrResponse>('/pdf/ocr', file, 'file', formData, onProgress);
+  return upload<PdfOcrResponse>('/pdf/ocr', file, 'file', formData, onProgress, signal);
 };
 
 export default client;

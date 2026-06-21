@@ -75,6 +75,7 @@ export async function upload<T>(
   fieldKey = 'files',
   params?: Record<string, any>,
   onProgress?: (pct: number) => void,
+  signal?: AbortSignal,
 ): Promise<T> {
   const form = new FormData();
   const files = Array.isArray(file) ? file : [file];
@@ -91,7 +92,8 @@ export async function upload<T>(
 
   const res = await client.post(url, form, {
     headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 300_000,
+    timeout: 600_000, // 10 minutes — large PDF OCR can take longer than 5 min
+    signal,
     onUploadProgress: (e) => {
       if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
     },

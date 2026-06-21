@@ -76,6 +76,9 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
     return Math.max(1, to - from + 1);
   })();
 
+  // Abort controller for cancelling in-flight OCR requests
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // Image viewer state (extract tab thumbnails)
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerPage, setViewerPage] = useState<{ page_number: number; image_b64: string } | null>(null);
@@ -119,10 +122,22 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
       addToast('Only PDF files are accepted.', 'error');
       return;
     }
+    // Reset all processing state before loading new file
     setFile(f);
     setResult(null);
     setPageRange((p) => ({ ...p, from: 1, to: '' }));
     setPdfTotalPages(null);
+    setLoading(false);
+    setProgress(0);
+    setPagesCompleted(0);
+    setProgressTotalPages(0);
+    setElapsedMs(0);
+    setLastPageTimeMs(0);
+    // Abort any in-flight request from previous run
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
 
     // Auto-detect total pages in background so "To page" can pre-fill
     try {
@@ -159,7 +174,11 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
       addToast(`PDF info — ${data.total_pages} pages found.`, 'success');
     } catch (err: any) {
       addToast(err?.message || 'Failed to read PDF info.', 'error');
-    } finally { setLoading(false); }
+    } finally { 
+      setLoading(false); 
+      setProgress(0);
+      setPagesCompleted(0);
+    }
   };
 
   const onExtract = async () => {
@@ -207,6 +226,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
           }
           const data = JSON.parse(raw);
           if (data.type === 'live_pdf' && data.data) {
+            console.log(`[WS] Progress: ${data.data.pages_completed}/${data.data.total_pages}`);
             setPagesCompleted(data.data.pages_completed);
             if (data.data.total_pages > 0) setProgressTotalPages(data.data.total_pages);
             if (data.data.last_page_time_ms) setLastPageTimeMs(data.data.last_page_time_ms);
@@ -248,7 +268,16 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
       } else {
         addToast(err?.message || 'PDF extraction failed.', 'error');
       }
-    } finally { clearInterval(tickInterval); setLoading(false); setCurrentTaskId(null); }
+    } finally { 
+      clearInterval(tickInterval); 
+      setLoading(false); 
+      setCurrentTaskId(null);
+      if (ws) {
+        try { ws.send('unsubscribe'); ws.close(); } catch {}
+      }
+      setProgress(0);
+      setPagesCompleted(0);
+    }
   };
 
   const onPdfOcr = async () => {
@@ -263,6 +292,10 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
     setLastPageTimeMs(0);
     setProgressTotalPages(0);
     setResult(null); // clear previous results
+
+    // Create abort controller for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     // Record wall-clock start time for live display
     processingStartTime.current = Date.now();
@@ -282,6 +315,10 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
       const apiHost = import.meta.env.VITE_API_WS_HOST || '127.0.0.1:8000';
       ws = new WebSocket(`ws://${apiHost}/api/v2/ws/task/${taskId}`);
 
+      ws.onopen = () => {
+        console.log(`[WS] Connected to task ${taskId}`);
+      };
+
       ws.onmessage = (event) => {
         try {
           // Handle both text and binary WebSocket frames
@@ -293,6 +330,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
           }
           const data = JSON.parse(raw);
           if (data.type === 'live_pdf' && data.data) {
+            console.log(`[WS] Progress: ${data.data.pages_completed}/${data.data.total_pages}`);
             setPagesCompleted(data.data.pages_completed);
             if (data.data.total_pages > 0) setProgressTotalPages(data.data.total_pages);
             if (data.data.last_page_time_ms) setLastPageTimeMs(data.data.last_page_time_ms);
@@ -300,6 +338,10 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
         } catch {
           // Ignore parse errors
         }
+      };
+
+      ws.onerror = () => {
+        console.error(`[WS] WebSocket error for task ${taskId}`);
       };
     } catch {
       // WebSocket not available — proceed without live updates
@@ -320,6 +362,7 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
         spell_check_use_word_freq: spellWordFreq,
       };
       const data = await pdfOcr(file, pageRange.from, pageRange.to ? Number(pageRange.to) : undefined, confThreshold, imgSize, String(textCleaning), undefined, taskId, advancedOptions);
+      abortControllerRef.current = null;
       // Clean up WebSocket on completion
       if (ws && ws.readyState === WebSocket.OPEN) ws.send('unsubscribe');
       clearInterval(tickInterval);
@@ -349,6 +392,9 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
         // Timeout — page processing timed out
         const errMsg = err?.response?.data?.message || 'Page processing timed out.';
         addToast(errMsg, 'error');
+      } else if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
+        // Request was aborted — do nothing, onStop already handled cleanup
+        return;
       } else {
         addToast(err?.message || 'PDF OCR failed.', 'error');
       }
@@ -356,6 +402,12 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
       clearInterval(tickInterval);
       setLoading(false);
       setCurrentTaskId(null);
+      if (ws) {
+        try { ws.send('unsubscribe'); ws.close(); } catch {}
+      }
+      setProgress(0);
+      setPagesCompleted(0);
+      abortControllerRef.current = null;
     }
   };
 
@@ -365,12 +417,18 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
       const res = await cancelPdfOcr(currentTaskId);
       if (res.status === 'cancelled') {
         addToast('Process stopped.', 'info');
+        // Also abort any in-flight axios request
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+        setLoading(false);
+        setCurrentTaskId(null);
       } else {
         addToast('Task already completed.', 'info');
       }
     } catch (err: any) {
       addToast(err?.message || 'Failed to stop process.', 'warning');
-    } finally {
+      // Still clear state even if cancel failed
       setLoading(false);
       setCurrentTaskId(null);
     }
@@ -912,9 +970,9 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
               <div className={`text-xs font-medium uppercase tracking-wider mb-3 ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>Page Range</div>
               <div className="flex items-center gap-3 text-sm">
                 <span className={isDark ? 'text-slate-400' : 'text-gray-600'}>From:</span>
-                <input type="number" min={1} value={pageRange.from} onChange={(e) => setPageRange((p) => ({ ...p, from: Number(e.target.value) }))} className={`w-20 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
+                <input type="number" min={1} max={pdfTotalPages || 99999} value={pageRange.from} onChange={(e) => setPageRange((p) => ({ ...p, from: Math.max(1, Number(e.target.value) || 1) }))} className={`w-20 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
                 <span className={isDark ? 'text-slate-400' : 'text-gray-600'}>To:</span>
-                <input type="number" min={1} value={pageRange.to || ''} onChange={(e) => setPageRange((p) => ({ ...p, to: e.target.value }))} placeholder="All" className={`w-20 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
+                <input type="number" min={1} max={pdfTotalPages || 99999} value={pageRange.to || ''} onChange={(e) => { const val = e.target.value; if (val === '') setPageRange((p) => ({ ...p, to: '' })); else setPageRange((p) => ({ ...p, to: Math.min(+(pdfTotalPages || 99999), Math.max(1, Number(val))) })); }} placeholder="All" className={`w-20 border rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-slate-800/50 border-slate-700/60 text-white' : 'bg-white border-gray-200 text-gray-900'}`} />
                 <span className={`text-xs ${isDark ? 'text-slate-600' : 'text-gray-400'}`}>Leave blank for all pages</span>
                 {pdfTotalPages! > 0 && pageRange.to && pageRange.from && (
                   <span className={`text-xs font-medium ${isDark ? 'text-violet-400' : 'text-violet-600'}`}>{totalPagesRange} pages selected</span>
