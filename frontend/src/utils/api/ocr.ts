@@ -9,7 +9,7 @@
  * Covers single-image, batch, enhanced, and direct-tensor endpoints.
  */
 
-import { upload } from '../apiClient';
+import { upload, postJson } from '../apiClient';
 import type { OcrResult, BatchOcrResponse, SingleOcrParams, EnhanceOptions } from '#/types/api';
 
 /** Process a single image for Urdu text extraction. */
@@ -32,6 +32,7 @@ export const ocrSingle = (
     conf_threshold: params?.conf_threshold,
     img_size: params?.img_size,
     text_cleaning: textCleaning,
+    use_cache: params?.use_cache,
   };
   return upload<OcrResult>('/ocr/single', file, 'file', cleanedParams, onProgress);
 };
@@ -75,3 +76,7 @@ export const ocrDirect = (
   onProgress?: (pct: number) => void,
 ): Promise<OcrResult> =>
   upload<OcrResult>('/ocr/direct-tensor', file, 'file', params, onProgress);
+
+/** Clear the server-side OCR result cache. */
+export const clearCache = (): Promise<{ status: string; message: string }> =>
+  postJson('/system/cache/clear', {});

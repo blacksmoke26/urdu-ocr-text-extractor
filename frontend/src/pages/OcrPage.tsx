@@ -16,6 +16,7 @@ import {
   ChevronUp,
   ClipboardPaste,
   Copy,
+  Eraser,
   Eye,
   FileImage,
   Hash,
@@ -39,8 +40,9 @@ import {
   ZoomIn,
   Download,
 } from 'lucide-react';
-import {ocrBatch, ocrEnhanced, ocrSingle} from '#/utils/api/ocr';
+import {clearCache as ocrClearCache, ocrBatch, ocrEnhanced, ocrSingle} from '#/utils/api/ocr';
 import {spellCheck} from '#/utils/api/spell';
+import {Switch} from '#/components/ui/Switch';
 import type {BatchOcrResponse, ConfidenceStats, OcrLine, OcrResult, SpellCorrection} from '#/types/api';
 import {useToast} from '#/context/ToastContext';
 import {Badge} from '#/components/ui/Badge';
@@ -251,6 +253,10 @@ export function OcrPage({ onResult }: OcrPageProps) {
   // Horizontal card / modal state
   const [expandedCardIdx, setExpandedCardIdx] = useState<number | null>(null);
 
+  // ─── Cache Control State ───────────────────────────────
+  const [bypassCache, setBypassCache] = useState(false);
+  const [cacheClearedKey, setCacheClearedKey] = useState(0); // bust stale cache entries
+
   const { addToast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const activeEnhanceOptions = computeEnhanceOptions(enhancements);
@@ -373,6 +379,18 @@ export function OcrPage({ onResult }: OcrPageProps) {
     };
   }, [spellSettings]);
 
+  /* ── Cache clear handler ─────────────────────────── */
+
+  const handleClearCache = useCallback(async () => {
+    try {
+      await ocrClearCache();
+      setCacheClearedKey(prev => prev + 1);
+      addToast('OCR cache cleared.', 'success');
+    } catch (err: any) {
+      addToast(err?.message || 'Failed to clear cache.', 'error');
+    }
+  }, [addToast]);
+
   const runOcr = useCallback(async () => {
     if (files.length === 0) return;
     setLoading(true);
@@ -388,11 +406,12 @@ export function OcrPage({ onResult }: OcrPageProps) {
       if (files.length > 1) {
         // Multi-image processing
         const useEnhance = hasActiveToggles || hasActiveSliders;
+        const ocrParams = bypassCache ? { ...spellApiParams, use_cache: false } : spellApiParams;
 
         if (!useEnhance && files.length >= 2) {
           // Use batch endpoint for efficiency
           try {
-            const batchResponse: BatchOcrResponse = await ocrBatch(files, spellApiParams, (pct) => setProgress(pct));
+            const batchResponse: BatchOcrResponse = await ocrBatch(files, ocrParams, (pct) => setProgress(pct));
             finalResults = batchResponse.results;
             setResults(finalResults);
             addToast(`OCR complete — ${batchResponse.completed} of ${batchResponse.total_files} images processed.`, 'success');
@@ -400,7 +419,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
             // Fallback: process individually
             for (let i = 0; i < files.length; i++) {
               setCurrentFileIndex(i);
-              const result = await ocrSingle(files[i], spellApiParams, (pct) => setProgress(pct));
+              const result = await ocrSingle(files[i], ocrParams, (pct) => setProgress(pct));
               finalResults.push(result);
               setResults([...finalResults]);
             }
@@ -427,7 +446,8 @@ export function OcrPage({ onResult }: OcrPageProps) {
           const data = await ocrEnhanced(files[0], activeEnhanceOptions, setProgress);
           finalResults = [data];
         } else {
-          const data = await ocrSingle(files[0], undefined, setProgress);
+          const ocrParams = bypassCache ? { ...spellApiParams, use_cache: false } : spellApiParams;
+          const data = await ocrSingle(files[0], ocrParams ?? undefined, setProgress);
           finalResults = [data];
         }
       }
@@ -453,7 +473,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
       setLoading(false);
       setCurrentFileIndex(0);
     }
-  }, [files, hasActiveToggles, hasActiveSliders, activeEnhanceOptions, spellApiParams, addToast, onResult]);
+  }, [files, hasActiveToggles, hasActiveSliders, activeEnhanceOptions, spellApiParams, bypassCache, addToast, onResult]);
 
   /* ── Export helpers ─────────────────────────────── */
 
@@ -518,28 +538,11 @@ export function OcrPage({ onResult }: OcrPageProps) {
         </div>
       </div>
 
-      {/* ── Upload Zone ──────────────────────────── */}
+      {/* ── Upload Zone + Controls (single card) ───────── */}
       <div className="glass-card rounded-2xl p-6 animate-fade-in">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <ImageIcon className="h-5 w-5 text-slate-300" />
-            <h3 className="font-semibold text-white">Upload Images</h3>
-            {files.length > 0 && (
-              <span className="text-xs px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 font-medium">
-                {files.length} file{files.length > 1 ? 's' : ''}
-              </span>
-            )}
-          </div>
-          {files.length > 0 && (
-            <button onClick={() => { setFiles([]); setPreviews([]); }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-red-400 transition-colors cursor-pointer">
-              <Trash2 className="h-3.5 w-3.5" /> Clear All
-            </button>
-          )}
-        </div>
-
-        {/* Drop zone */}
+        {/* ── Drop zone ─────────────────────────── */}
         <div
-          className={`relative border-2 border-dashed rounded-xl p-6 sm:p-10 text-center transition-all duration-300 cursor-pointer ${
+          className={`relative border-2 border-dashed rounded-xl p-6 sm:p-10 text-center transition-all duration-300 cursor-pointer mb-5 ${
             files.length > 0
               ? 'border-violet-500/40 bg-violet-500/[0.03]'
               : 'border-slate-700/60 hover:border-violet-500/30 hover:bg-white/[0.02]'
@@ -605,299 +608,227 @@ export function OcrPage({ onResult }: OcrPageProps) {
           )}
         </div>
 
-        {/* ── Spell Check Options ─────────────────────── */}
-        <div className="mt-4">
-          <button
-            onClick={() => setSpellOpen(!spellOpen)}
-            className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white transition-colors cursor-pointer"
-          >
-            <ShieldCheck className={`h-4 w-4 ${spellSettings.enabled ? 'text-emerald-400' : ''}`} />
-            Spell Check
-            {spellSettings.enabled && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-medium capitalize">{spellSettings.mode}</span>
-            )}
-            {spellOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-          </button>
-
-          {spellOpen && (
-            <div className="mt-3 space-y-4 animate-fade-in">
-              {/* Enable toggle */}
-              <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.02] border border-slate-700/30">
-                <span className="text-sm text-slate-300">Enable auto-correction</span>
-                <button
-                  onClick={() => setSpellSettings(prev => ({ ...prev, enabled: !prev.enabled }))}
-                  className={`relative w-11 h-6 rounded-full transition-colors ${spellSettings.enabled ? 'bg-emerald-500' : 'bg-slate-600'} cursor-pointer`}
-                >
-                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${spellSettings.enabled ? 'translate-x-5' : ''}`} />
-                </button>
-              </div>
-
-              {spellSettings.enabled && (
-                <>
-                  {/* Mode selector */}
-                  <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-700/30 space-y-3">
-                    <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Correction Mode</span>
-                    <div className="grid grid-cols-3 gap-2">
-                      {spellModes.map(mode => (
-                        <button
-                          key={mode.value}
-                          onClick={() => setSpellSettings(prev => ({ ...prev, mode: mode.value }))}
-                          className={`px-3 py-2 rounded-lg text-xs font-medium transition-all border ${
-                            spellSettings.mode === mode.value
-                              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                              : 'bg-white/[0.02] text-slate-400 border-slate-700/30 hover:border-slate-600'
-                          }`}
-                        >
-                          {mode.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Max Distance slider */}
-                  <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-700/30 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-300">Max Edit Distance</span>
-                      <span className="text-sm font-mono text-emerald-400">{spellSettings.maxDistance}</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={1}
-                      max={4}
-                      step={1}
-                      value={spellSettings.maxDistance}
-                      onChange={(e) => setSpellSettings(prev => ({ ...prev, maxDistance: Number(e.target.value) }))}
-                      className="w-full accent-emerald-500"
-                    />
-                    <span className="text-xs text-slate-500">Higher values catch more errors but are slower</span>
-                  </div>
-
-                  {/* Use Word Frequency toggle */}
-                  <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.02] border border-slate-700/30">
-                    <div>
-                      <span className="text-sm text-slate-300">Use Word Frequency</span>
-                      <p className="text-xs text-slate-500 mt-0.5">Weight corrections by UrduHack frequencies</p>
-                    </div>
-                    <button
-                      onClick={() => setSpellSettings(prev => ({ ...prev, useWordFreq: !prev.useWordFreq }))}
-                      className={`relative w-11 h-6 rounded-full transition-colors ${spellSettings.useWordFreq ? 'bg-emerald-500' : 'bg-slate-600'} cursor-pointer`}>
-                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${spellSettings.useWordFreq ? 'translate-x-5' : ''}`} />
-                    </button>
-                  </div>
-
-                  {/* Spell Preview */}
-                  <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-700/30 space-y-3">
-                    <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Preview</span>
-                    <textarea
-                      rows={3}
-                      value={spellPreviewText}
-                      onChange={(e) => {
-                        setSpellPreviewText(e.target.value);
-                        void runSpellPreview(e.target.value);
-                      }}
-                      placeholder="Type text here to preview spell corrections..."
-                      className="w-full rounded-lg px-3 py-2 bg-slate-800/50 border border-slate-700 text-sm text-white placeholder:text-slate-600 resize-none focus:outline-none focus:border-emerald-500/50"
-                    />
-                    {spellPreviewLoading && (
-                      <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <Loader2 className="h-3 w-3 animate-spin" /> Analyzing...
-                      </div>
-                    )}
-                    {spellCorrections.length > 0 && (
-                      <div className="space-y-3">
-                        <span className="text-xs font-medium text-emerald-400">{spellCorrections.length} correction(s) detected:</span>
-                        {/* Inline highlights showing corrections applied within the OCR result */}
-                        {expandedCardIdx !== null && results[expandedCardIdx]?.full_text && (
-                          <div className="space-y-1.5">
-                            <span className="text-xs text-slate-500">Corrections in this result:</span>
-                            <div className="rounded-lg px-3 py-2 bg-emerald-500/5 border border-emerald-500/20 max-h-[120px] overflow-y-auto">
-                              {(() => {
-                                const highlights = buildCorrectionHighlights(
-                                  results[expandedCardIdx].full_text,
-                                  spellCorrections
-                                );
-                                setCorrectionHighlights(highlights);
-                                return Object.entries(highlights).sort(([a], [b]) => Number(a) - Number(b)).map(([pos, corrections]) => (
-                                  <div key={pos} className="flex items-center gap-2 text-xs">
-                                    <span className="text-slate-500 font-mono">#{pos}:</span>
-                                    {corrections.map((c, i) => (
-                                      <Fragment key={i}>
-                                        <span className="line-through text-red-400 bg-red-500/15 px-1.5 py-0.5 rounded cursor-help" title={c.reason || 'Spelling issue'}>
-                                          {c.from}
-                                        </span>
-                                        <span className="text-slate-600">→</span>
-                                        <span className="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded font-medium">{c.to}</span>
-                                      </Fragment>
-                                    ))}
-                                  </div>
-                                ));
-                              })()}
-                            </div>
-                          </div>
-                        )}
-                        {spellCorrections.map((corr, i) => (
-                          <div key={i} className="flex items-center gap-2 text-xs">
-                            <span className="line-through text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded">{corr.from}</span>
-                            <span className="text-slate-600">→</span>
-                            <span className="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded font-medium">{corr.to}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
+        {/* File count + clear button */}
+        {files.length > 0 && (
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="h-5 w-5 text-slate-300" />
+              <h3 className="font-semibold text-white">Upload Images</h3>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 font-medium">
+                {files.length} file{files.length > 1 ? 's' : ''}
+              </span>
             </div>
-          )}
-        </div>
+            <button onClick={() => { setFiles([]); setPreviews([]); }} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-red-400 transition-colors cursor-pointer">
+              <Trash2 className="h-3.5 w-3.5" /> Clear All
+            </button>
+          </div>
+        )}
 
-        {/* ── Enhancement Options ─────────────────── */}
-        <div className="mt-4">
-          <button
-            onClick={() => setEnhanceOpen(!enhanceOpen)}
-            className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white transition-colors cursor-pointer"
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-            Enhancement Options
-            {activeCount > 0 && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-400 font-medium">{activeCount} active</span>
-            )}
-            {enhanceOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-          </button>
-
-          {enhanceOpen && (
-            <div className="mt-3 space-y-4 animate-fade-in">
-              {/* Toggle row */}
-              <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-700/30">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Quick Toggles</span>
-                  {(hasActiveToggles || hasActiveSliders) && (
-                    <button onClick={resetEnhancements} className="text-xs text-violet-400 hover:text-violet-300 transition-colors cursor-pointer">Reset All</button>
-                  )}
-                </div>
+        {/* ── Controls Panel ─────────────────────── */}
+        <div className="rounded-2xl border border-slate-700/40 bg-white/[0.01] overflow-hidden">
+          {/* Top row: spell + enhancements (collapsible) */}
+          <div className="border-b border-slate-700/40">
+            {/* Spell Check section */}
+            <button
+              onClick={() => setSpellOpen(!spellOpen)}
+              className="w-full flex items-center justify-between px-5 py-3 text-sm font-medium text-slate-300 hover:text-white hover:bg-white/[0.02] transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-slate-500" />
+                Spell Check
+              </span>
+              {spellOpen ? <ChevronUp className="h-3.5 w-3.5 text-slate-500" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-500" />}
+            </button>
+            {spellOpen && (
+              <div className="px-5 pb-4 pt-1 animate-fade-in space-y-3">
+                {<span className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Mode</span>}
                 <div className="flex flex-wrap gap-2">
-                  {toggleDefs.map(({ key, label, icon: Icon }) => (
+                  {spellModes.map(({ value, label }) => (
                     <button
-                      key={key}
-                      onClick={() => toggleEnhance(key)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                        enhancements.toggles[key]
-                          ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
-                          : 'bg-white/[0.03] text-slate-400 border border-slate-700/30 hover:bg-white/[0.06] hover:text-slate-300'
+                      key={value}
+                      onClick={() => setSpellSettings(prev => ({ ...prev, mode: value }))}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+                        spellSettings.mode === value
+                          ? 'bg-violet-500/20 text-violet-400 border-violet-500/30'
+                          : 'bg-white/[0.03] text-slate-400 border-slate-700/30 hover:bg-white/[0.06] hover:text-slate-300'
                       }`}
                     >
-                      <Icon className="h-3.5 w-3.5" />
                       {label}
                     </button>
                   ))}
                 </div>
               </div>
+            )}
+          </div>
 
-              {/* Sliders (expandable) */}
-              {slidersOpen && (
-                <div className="p-4 rounded-xl bg-white/[0.02] border border-slate-700/30 animate-fade-in">
-                  <span className="text-xs text-slate-500 uppercase tracking-wider font-medium block mb-3">Fine Tuning</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {sliderDefs.map(({ key, label, min, max, step }) => {
-                      const val = enhancements.sliders[key];
-                      return (
-                        <div key={key} className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <label className="text-xs text-slate-400">{label}</label>
-                            <span className={`text-xs font-mono ${val != null ? 'text-violet-400' : 'text-slate-600'}`}>
-                              {val != null ? (val > 0 ? `+${val}` : val) : 'Off'}
-                            </span>
+          {/* Enhancement Options section */}
+          <div className="border-b border-slate-700/40">
+            <button
+              onClick={() => setEnhanceOpen(!enhanceOpen)}
+              className="w-full flex items-center justify-between px-5 py-3 text-sm font-medium text-slate-300 hover:text-white hover:bg-white/[0.02] transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <SlidersHorizontal className="h-4 w-4 text-slate-500" />
+                Enhancement Options
+                {activeCount > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400 font-semibold">{activeCount} active</span>
+                )}
+              </span>
+              {enhanceOpen ? <ChevronUp className="h-3.5 w-3.5 text-slate-500" /> : <ChevronDown className="h-3.5 w-3.5 text-slate-500" />}
+            </button>
+
+            {enhanceOpen && (
+              <div className="px-5 pb-4 animate-fade-in space-y-4">
+                {/* Quick Toggles */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Quick Toggles</span>
+                    {(hasActiveToggles || hasActiveSliders) && (
+                      <button onClick={resetEnhancements} className="text-[10px] text-violet-400 hover:text-violet-300 cursor-pointer">Reset All</button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {toggleDefs.map(({ key, label, icon: Icon }) => (
+                      <button
+                        key={key}
+                        onClick={() => toggleEnhance(key)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border ${
+                          enhancements.toggles[key]
+                            ? 'bg-violet-500/20 text-violet-400 border-violet-500/30'
+                            : 'bg-white/[0.03] text-slate-400 border-transparent hover:bg-white/[0.06] hover:text-slate-300'
+                        }`}
+                      >
+                        <Icon className="h-3 w-3" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Fine Tuning */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Fine Tuning</span>
+                    <button
+                      onClick={() => setSlidersOpen(!slidersOpen)}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer ${
+                        slidersOpen ? 'bg-violet-500/15 text-violet-400' : 'text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {slidersOpen ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronUp className="h-2.5 w-2.5" />}
+                      {slidersOpen ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                  {slidersOpen && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg bg-white/[0.02]">
+                      {sliderDefs.map(({ key, label, min, max, step }) => {
+                        const val = enhancements.sliders[key];
+                        return (
+                          <div key={key} className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] text-slate-400">{label}</span>
+                              <span className={`text-[11px] font-mono ${val != null ? 'text-violet-400' : 'text-slate-600'}`}>
+                                {val != null ? (val > 0 ? `+${val}` : val) : 'Off'}
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min={min} max={max} step={step}
+                              value={val ?? (min + max) / 2}
+                              onChange={(e) => {
+                                const v = Number(e.target.value);
+                                setSliderValue(key, v >= min && v <= max ? v : null);
+                                if (v >= min && v <= max) setPreviewFilter(computeCssFilters({ ...enhancements, sliders: { ...enhancements.sliders, [key]: v } }));
+                              }}
+                              className="enhancement-slider w-full"
+                            />
                           </div>
-                          <input
-                            type="range"
-                            min={min} max={max} step={step}
-                            value={val ?? (min + max) / 2}
-                            onChange={(e) => {
-                              const v = Number(e.target.value);
-                              setSliderValue(key, v >= min && v <= max ? v : null);
-                              if (v >= min && v <= max) setPreviewFilter(computeCssFilters({ ...enhancements, sliders: { ...enhancements.sliders, [key]: v } }));
-                            }}
-                            className="enhancement-slider"
-                          />
-                          <div className="flex justify-between text-[9px] text-slate-600">
-                            <span>{min}</span><span>{max}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Live preview */}
+                {previews.length > 0 && (hasActiveToggles || hasActiveSliders) && (
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <Eye className="h-3 w-3 text-slate-500" />
+                    Live preview:
+                    {previewFilter !== 'none' ? (
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">On</span>
+                    ) : (
+                      <button onClick={() => setPreviewFilter(computeCssFilters(enhancements))} className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-400 cursor-pointer hover:bg-slate-600" disabled={loading}>Apply</button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Bottom row: action buttons + cache */}
+          <div className="px-5 py-4 flex items-center justify-between gap-4">
+            {/* Left: primary action + bypass toggle */}
+            <div className="flex items-center gap-3 flex-wrap">
+              {<button
+                onClick={runOcr}
+                disabled={files.length === 0 || loading}
+                className={`inline-flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-semibold transition-all duration-300 ${
+                  files.length > 0 && !loading
+                    ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-violet-500/15 hover:shadow-violet-500/25'
+                    : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                } disabled:cursor-not-allowed`}
+              >
+                {loading ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /> Processing…</>
+                ) : (
+                  <><Sparkles className="h-4 w-4" /> Extract Text{files.length > 1 ? ` (${files.length})` : ''}</>
+                )}
+              </button>}
+
+              {/* Spacer for progress bar */}
+              {progress > 0 && progress < 100 && (
+                <div className="flex-1 min-w-[120px] max-w-[200px]">
+                  <div className="h-1.5 rounded-full overflow-hidden bg-slate-800/50">
+                    <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-300" style={{ width: `${progress}%` }} />
                   </div>
                 </div>
               )}
+            </div>
 
-              {/* Preview filter toggle */}
-              {previews.length > 0 && (hasActiveToggles || hasActiveSliders) && (
-                <div className="flex items-center gap-2 text-xs">
-                  <Eye className="h-3.5 w-3.5 text-slate-500" />
-                  <span className="text-slate-400">Live preview:</span>
-                  {previewFilter !== 'none' ? (
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">On</span>
-                  ) : (
-                    <button onClick={() => setPreviewFilter(computeCssFilters(enhancements))} className="px-2 py-0.5 rounded bg-slate-700 text-slate-400 cursor-pointer hover:bg-slate-600 hover:text-white transition-colors">Apply</button>
-                  )}
-                  {previewFilter !== 'none' && (
-                    <button onClick={() => setPreviewFilter('none')} className="text-violet-400 hover:text-violet-300 cursor-pointer">Reset</button>
-                  )}
-                </div>
+            {/* Right: utility controls */}
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              {<Switch
+                checked={bypassCache}
+                onCheckedChange={setBypassCache}
+                size="sm"
+                color="primary"
+                label={<span className="text-slate-400">Bypass cache</span>}
+                containerClassName="gap-1.5"
+              />}
+
+              {results.length > 0 && results[activeResultTab] && ((results[activeResultTab] as any).ai_analysis || (results[activeResultTab] as any).summary) && (
+                <button
+                  onClick={() => setInsightsOpen(!insightsOpen)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                    insightsOpen ? 'bg-violet-500/15 text-violet-400 border border-violet-500/20' : 'bg-white/[0.03] text-slate-400 hover:text-slate-300 border border-slate-700/30'
+                  }`}
+                >
+                  <Brain className="h-3 w-3" /> AI Insights
+                  {insightsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                </button>
               )}
+
+              <button
+                onClick={handleClearCache}
+                disabled={loading}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  'bg-white/[0.03] text-slate-400 hover:text-red-400 border border-slate-700/30 hover:border-red-500/30 hover:bg-red-500/5'
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+              >
+                <Eraser className="h-3 w-3" /> Clear Cache
+              </button>
             </div>
-          )}
-        </div>
-
-        {/* ── Action buttons ─────────────────────── */}
-        <div className="mt-5 flex items-center gap-3 flex-wrap">
-          <button
-            onClick={runOcr}
-            disabled={files.length === 0 || loading}
-            className={`relative inline-flex items-center justify-center gap-2 rounded-xl px-6 py-2.5 text-sm font-semibold transition-all duration-300 ${
-              files.length > 0 && !loading
-                ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:scale-[1.02] active:scale-[0.98]'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-            } disabled:cursor-not-allowed`}
-          >
-            {loading ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Processing…</>
-            ) : (
-              <><Sparkles className="h-4 w-4" /> Extract Text{files.length > 1 ? ` (${files.length})` : ''}</>
-            )}
-          </button>
-
-          {progress > 0 && progress < 100 && (
-            <div className="flex-1 max-w-[200px]">
-              <div className="h-2 rounded-full overflow-hidden bg-slate-800/50">
-                <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-300" style={{ width: `${progress}%` }} />
-              </div>
-            </div>
-          )}
-
-      {/* Toggle sliders button */}
-          {enhanceOpen && (
-            <button
-              onClick={() => setSlidersOpen(!slidersOpen)}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                slidersOpen ? 'bg-violet-500/15 text-violet-400 border border-violet-500/20' : 'bg-white/[0.03] text-slate-400 hover:text-slate-300 border border-slate-700/30'
-              }`}
-            >
-              <Minus className="h-3 w-3" /> Fine Tuning
-            </button>
-          )}
-
-          {/* AI Insights toggle */}
-          {results.length > 0 && results[activeResultTab] && ((results[activeResultTab] as any).ai_analysis || (results[activeResultTab] as any).summary) && (
-            <button
-              onClick={() => setInsightsOpen(!insightsOpen)}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                insightsOpen ? 'bg-violet-500/15 text-violet-400 border border-violet-500/20' : 'bg-white/[0.03] text-slate-400 hover:text-slate-300 border border-slate-700/30'
-              }`}
-            >
-              <Brain className="h-3 w-3" /> AI Insights
-              {insightsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            </button>
-          )}
+          </div>
         </div>
       </div>
 

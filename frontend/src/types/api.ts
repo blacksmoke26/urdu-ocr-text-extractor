@@ -66,6 +66,7 @@ export interface SingleOcrParams {
   autocorrect_mode?: 'char' | 'distance' | 'hybrid';
   spell_check_max_distance?: number;
   spell_check_use_word_freq?: boolean;
+  use_cache?: boolean;
 }
 
 /** Advanced OCR options for PDF and image OCR endpoints. */
