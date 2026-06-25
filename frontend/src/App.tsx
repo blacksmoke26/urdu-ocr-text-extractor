@@ -252,7 +252,7 @@ function Shell() {
         <footer className={`border-t px-8 py-3 ${isDark ? 'border-slate-800/40' : 'border-gray-200'}`}>
           <div className="flex items-center justify-between">
             <p className={`text-[11px] ${isDark ? 'text-slate-600' : 'text-gray-400'}`}>
-              End-to-End Urdu OCR WebApp · FastAPI Backend · React + TypeScript
+              Urdu OCR · FastAPI Backend · React + TypeScript
             </p>
             <div className="flex items-center gap-3">
               <span
