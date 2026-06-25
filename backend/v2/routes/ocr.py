@@ -211,6 +211,7 @@ async def single_ocr_endpoint(
     conf_threshold: float = Form(DEFAULT_CONF_THRESHOLD),
     img_size: int = Form(DEFAULT_IMG_SIZE),
     text_cleaning: str = Form("true"),
+    use_cache: bool = Form(True),
 ):
     load_models()
 
@@ -244,6 +245,7 @@ async def single_ocr_endpoint(
         conf_threshold=conf_threshold,
         img_size=img_size,
         text_cleaning=clean_opts,
+        use_cache=use_cache,
     )
 
     # Generate thumbnail for the source image (always enabled with config defaults)
