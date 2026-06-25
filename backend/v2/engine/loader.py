@@ -9,6 +9,7 @@ https://github.com/abdur75648/End-To-End-Urdu-OCR-WebApp
 
 from __future__ import annotations
 
+import pickle
 import io
 import math
 import os
@@ -381,7 +382,9 @@ def load_models(device_label: Optional[str] = None) -> dict:
 
     try:
         state_dict = torch.load(str(RECOGNITION_MODEL_PATH), map_location=device, weights_only=True)
-    except TypeError:
+    except (TypeError, pickle.UnpicklingError):
+        # PyTorch 2.6+ defaults weights_only=True, but ultralytics checkpoints
+        # contain DetectionModel which is not in the default allowlist.
         state_dict = torch.load(str(RECOGNITION_MODEL_PATH), map_location=device, weights_only=False)
     _recognition_model.load_state_dict(state_dict)
     _recognition_model.eval()
@@ -410,6 +413,45 @@ def load_models(device_label: Optional[str] = None) -> dict:
                 os.environ["OCR_YOLO_DEVICE"] = "cpu"
 
     from ultralytics import YOLO
+    from ultralytics.nn.tasks import DetectionModel
+
+    # Allowlist classes so torch.load(weights_only=True) in PyTorch 2.6+ 
+    # doesn't reject checkpoints during both recognition model and YOLO loads.
+    # Use sys.modules to avoid creating local 'torch' binding via 'import' statements.
+    import sys
+    torch_mod = sys.modules['torch']
+    torch_serialization = torch_mod.serialization
+    nn_mod = sys.modules.get('torch.nn') or __import__('torch.nn')
+    safe_classes = [
+        DetectionModel,
+        nn_mod.Sequential,
+    ]
+    torch_serialization.add_safe_globals(safe_classes)
+
+    # Patch torch.load to use weights_only=False around YOLO load, since
+    # PyTorch 2.6+ defaults to True and ultralytics checkpoints contain
+    # custom classes we can't fully allowlist.
+    import inspect as _inspect
+    from ultralytics.nn import tasks as yl_tasks
+    original_safe_load = getattr(yl_tasks, 'torch_safe_load', None)
+    if original_safe_load is not None:
+        _sig = _inspect.signature(original_safe_load)
+        _has_wo = 'weights_only' in _sig.parameters
+        def patched_safe_load(*args, **kwargs):
+            if _has_wo:
+                kwargs['weights_only'] = False
+            return original_safe_load(*args, **kwargs)
+        yl_tasks.torch_safe_load = patched_safe_load
+    
+    # Also patch torch.load directly as a fallback — ultralytics may call
+    # it from other internal paths that don't go through torch_safe_load.
+    _orig_torch_load = torch_mod.load
+    def _patched_torch_load(*args, **kwargs):
+        if 'weights_only' not in kwargs:
+            kwargs['weights_only'] = False
+        return _orig_torch_load(*args, **kwargs)
+    torch_mod.load = _patched_torch_load
+
     _detection_model = YOLO(str(DETECTION_MODEL_PATH))
 
     _models_loaded = True
