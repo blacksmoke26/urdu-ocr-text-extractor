@@ -10,6 +10,7 @@
   --color-bg-card: rgba(30, 41, 59, 0.4);
   --color-bg-card-hover: rgba(51, 65, 85, 0.5);
   --color-bg-elevated: rgba(15, 23, 42, 0.85);
+  --color-bg-background: #0b0f19;
   --color-border-subtle: rgba(71, 85, 105, 0.4);
   --color-border-hover: rgba(139, 92, 246, 0.4);
   --color-accent-violet: #8b5cf6;
@@ -141,12 +142,12 @@ body {
 
 html.light,
 .light {
-  background: #f1f5f9 !important;
+  background: #f8fafc !important;
   color: #0f172a !important;
 }
 
 .light body {
-  background: #f1f5f9 !important;
+  background: #f8fafc !important;
   color: #0f172a !important;
 }
 
@@ -335,3 +336,138 @@ html.light,
 .stagger-3 { animation-delay: 0.3s; }
 .stagger-4 { animation-delay: 0.4s; }
 .stagger-5 { animation-delay: 0.5s; }
+
+/* ===== Light mode color overrides (applied when .dark class is NOT present) ===== */
+/* These ensure pages without explicit useTheme() still look correct in light mode. */
+
+html:not(.dark) .text-white {
+  color: #0f172a !important;
+}
+html:not(.dark) .bg-slate-900 {
+  background-color: #e2e8f0 !important;
+}
+
+/* Dark slate text → readable dark gray in light mode */
+html:not(.dark) .text-slate-50 {
+  color: #475569 !important;
+}
+html:not(.dark) .text-slate-200, html:not(.dark) .text-slate-300 {
+  color: #1e293b !important;
+}
+html:not(.dark) .text-slate-400 {
+  color: #64748b !important;
+}
+
+/* Slate-500 text — gray labels in light mode */
+html:not(.dark) .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+/* Dark slate backgrounds → light in equivalent in light mode */
+html:not(.dark) .bg-slate-700, html:not(.dark) .bg-slate-700\/50,
+html:not(.dark) .bg-slate-700\/40, html:not(.dark) .bg-slate-800,
+html:not(.dark) .bg-slate-800\/50, html:not(.dark) .bg-slate-800\/80 {
+  background-color: #e2e8f0 !important;
+}
+
+/* Additional slate-800/40 variant used for image container */
+html:not(.dark) .bg-slate-800\/40 {
+  background-color: rgba(226, 232, 240, 0.7) !important;
+}
+
+/* bg-white/5 specifically — needs a solid visible bg in light mode */
+html:not(.dark) .bg-white\/5 {
+  background-color: #f1f5f9 !important;
+}
+
+/* White with low opacity backgrounds used inside cards */
+html:not(.dark) .bg-white\/\[0\.01\],
+html:not(.dark) .bg-white\/\[0\.03\],
+html:not(.dark) .bg-white\/\[0\.04\] {
+  background-color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Result card backgrounds — need solid bg in light mode */
+html:not(.dark) .bg-white\/\[0\.02\] {
+  background-color: #f1f5f9 !important;
+}
+
+/* Border colors */
+html:not(.dark) .border-slate-700,
+html:not(.dark) .border-slate-700\/60,
+html:not(.dark) .border-slate-700\/40 {
+  border-color: #cbd5e1 !important;
+}
+html:not(.dark) .border-slate-800/40 {
+  border-color: rgba(203, 213, 225, 0.5) !important;
+}
+
+/* Border variants missing above */
+html:not(.dark) .border-slate-800\/50 {
+  border-color: rgba(203, 213, 225, 0.4) !important;
+}
+
+/* Accent text colors that may be too faint in light mode */
+html:not(.dark) .text-emerald-400 {
+  color: #059669 !important;
+}
+html:not(.dark) .text-red-400 {
+  color: #dc2626 !important;
+}
+html:not(.dark) .text-blue-400 {
+  color: #2563eb !important;
+}
+html:not(.dark) .text-amber-400 {
+  color: #d97706 !important;
+}
+
+/* Dark overlays */
+html:not(.dark) .bg-black\/40,
+html:not(.dark) .bg-black\/50 {
+  background-color: rgba(15, 23, 42, 0.06) !important;
+}
+
+/* Gradient backgrounds with black/transparent stops */
+html:not(.dark) .from-black\/60,
+html:not(.dark) .from-black\/80 {
+  --tw-gradient-from: rgba(15, 23, 42, 0.08);
+}
+
+/* Specific bg color overrides used in the app */
+html:not(.dark) .bg-\[\#0f1320\]\/95 {
+  background-color: rgba(248, 250, 252, 0.95) !important;
+}
+html:not(.dark) .bg-\[\#0b0f19\] {
+  background-color: #f8fafc !important;
+}
+
+/* Additional white/opacity backgrounds used in the app */
+html:not(.dark) .bg-white\/5,
+html:not(.dark) .bg-white\/3 {
+  background-color: rgba(241, 245, 249, 0.7) !important;
+}
+
+/* Specific card backgrounds that should be solid in light mode */
+html:not(.dark) .bg-white\/\[0\.02\] {
+  background-color: #f1f5f9 !important;
+}
+
+/* Transparent backgrounds that should be subtle in light mode */
+html:not(.dark) .bg-transparent { background-color: transparent !important; }
+
+/* Input fields with white text should have dark text in light mode */
+html:not(.dark) input.text-white,
+html:not(.dark) textarea.text-white {
+  color: #0f172a !important;
+}
+
+/* Inline style color overrides for Urdu text content */
+html:not(.dark) [style*="color:#e2e8f0"],
+html:not(.dark) [style*='color:#e2e8f0'] {
+  color: #1e293b !important;
+}
+
+/* Inline text color style (e.g., style={{color:'#e2e8f0'}}) → use a global text-color fallback */
+html:not(.dark) .urdu-font {
+  color: #1e293b !important;
+}

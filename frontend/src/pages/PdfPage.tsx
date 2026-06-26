@@ -48,9 +48,9 @@ import type {PdfExtractResponse, PdfInfo, PdfOcrPageResult, PdfOcrResponse, Spel
 
 type PdfTab = 'preview' | 'info' | 'extract' | 'ocr';
 
-const isDark = true;
-
 export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse) => void }) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [tab, setTab] = useState<PdfTab>('info');
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -115,7 +115,6 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
   const [lineCorrections, setLineCorrections] = useState<Record<number, string>>({});
 
   const { addToast } = useToast();
-  const { theme } = useTheme();
 
   const handleFile = async (f: File) => {
     if (!f.name.toLowerCase().endsWith('.pdf')) {
@@ -174,8 +173,8 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
       addToast(`PDF info — ${data.total_pages} pages found.`, 'success');
     } catch (err: any) {
       addToast(err?.message || 'Failed to read PDF info.', 'error');
-    } finally { 
-      setLoading(false); 
+    } finally {
+      setLoading(false);
       setProgress(0);
       setPagesCompleted(0);
     }
@@ -268,9 +267,9 @@ export function PdfPage({ onPdfResult }: { onPdfResult?: (result: PdfOcrResponse
       } else {
         addToast(err?.message || 'PDF extraction failed.', 'error');
       }
-    } finally { 
-      clearInterval(tickInterval); 
-      setLoading(false); 
+    } finally {
+      clearInterval(tickInterval);
+      setLoading(false);
       setCurrentTaskId(null);
       if (ws) {
         try { ws.send('unsubscribe'); ws.close(); } catch {}

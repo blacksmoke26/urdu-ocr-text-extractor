@@ -45,6 +45,7 @@ import {spellCheck} from '#/utils/api/spell';
 import {Switch} from '#/components/ui/Switch';
 import type {BatchOcrResponse, ConfidenceStats, OcrLine, OcrResult, SpellCorrection} from '#/types/api';
 import {useToast} from '#/context/ToastContext';
+import {useTheme} from '#/context/ThemeContext';
 import {Badge} from '#/components/ui/Badge';
 import {formatBytes, isImageFile} from '#/utils/file';
 import {Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle} from '#/components/ui/Dialog';
@@ -227,6 +228,8 @@ interface OcrPageProps {
 }
 
 export function OcrPage({ onResult }: OcrPageProps) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [results, setResults] = useState<OcrResult[]>([]);

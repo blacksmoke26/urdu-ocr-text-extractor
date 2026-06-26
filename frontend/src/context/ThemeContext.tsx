@@ -39,8 +39,10 @@ export function ThemeProvider({children}: ThemeProviderProps) {
     html.setAttribute('data-theme', theme);
     if (theme === 'dark') {
       html.classList.add('dark');
+      html.classList.remove('light');
     } else {
       html.classList.remove('dark');
+      html.classList.add('light');
     }
     localStorage.setItem('ocr-theme', theme);
   }, [theme]);

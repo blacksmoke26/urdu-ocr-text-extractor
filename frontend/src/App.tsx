@@ -300,7 +300,8 @@ function App() {
 function InsightsPage() {
   const [history, setHistory] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const isDark = true;
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
 
   useEffect(() => {
     getHistory(20).then((d) => {
@@ -356,13 +357,13 @@ function InsightsPage() {
       {/* Operation Breakdown */}
       {history.stats && history.stats.by_operation && Object.keys(history.stats.by_operation).length > 0 && (
         <div className="glass-card rounded-2xl p-6">
-          <h3 className="text-sm font-semibold text-white mb-4 uppercase tracking-wider">Operations Breakdown</h3>
+          <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'} mb-4 uppercase tracking-wider`}>Operations Breakdown</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {Object.entries(history.stats.by_operation).map(([op, count]) => (
               <div key={op} className={`p-4 rounded-xl ${isDark ? 'bg-white/5' : 'bg-gray-50'}`}>
                 <p
                   className={`text-[10px] uppercase tracking-wider font-medium mb-1 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{op.replace(/_/g, ' ')}</p>
-                <p className="text-2xl font-bold text-white">{count.toLocaleString()}</p>
+                <p className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{count.toLocaleString()}</p>
               </div>
             ))}
           </div>
@@ -372,7 +373,7 @@ function InsightsPage() {
       {/* Recent Activity */}
       {history.entries.length > 0 && (
         <div className="glass-card rounded-2xl p-6">
-          <h3 className="text-sm font-semibold text-white mb-4 uppercase tracking-wider">Recent Activity</h3>
+          <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'} mb-4 uppercase tracking-wider`}>Recent Activity</h3>
           <div className="space-y-2">
             {history.entries.slice(0, 10).map((entry) => (
               <div key={entry.id}

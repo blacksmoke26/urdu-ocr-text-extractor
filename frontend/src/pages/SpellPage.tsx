@@ -47,6 +47,7 @@ import type {
   Suggestion,
 } from '#/types/api';
 import {useToast} from '#/context/ToastContext';
+import {useTheme} from '#/context/ThemeContext';
 
 /* ─── Toast Helper (matches actual addToast API) ───── */
 
@@ -99,6 +100,8 @@ function confidenceBg(c: number) {
 /* ─── Main Page ──────────────────────────────────────── */
 
 function SpellPage() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [activeTab, setActiveTab] = useState<TabKey>('correct');
   const [spellInfo, setSpellInfo] = useState<any>(null);
   const [loadingInfo, setLoadingInfo] = useState(true);
