@@ -871,8 +871,10 @@ export function OcrPage({ onResult }: OcrPageProps) {
               const meanConf = result.confidence_stats?.mean ?? 0;
 
               return (
-                <div key={idx} className={`rounded-xl bg-white/[0.02] border transition-all duration-200 ${
-                  activeResultTab === idx ? 'border-violet-500/30' : 'border-slate-700/50'
+                <div key={idx} className={`rounded-xl border transition-all duration-200 ${
+                  isDark
+                    ? 'bg-white/[0.02] ' + (activeResultTab === idx ? 'border-violet-500/30' : 'border-slate-700/50')
+                    : 'bg-white shadow-sm border-gray-200 ' + (activeResultTab === idx ? 'border-violet-500/30' : '')
                 }`}>
                   {/* Card header: image thumbnail + status */}
                   <div className="flex items-start gap-3 p-4 pb-2">
@@ -910,7 +912,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
                         ) : (
                           <AlertTriangle className="h-3.5 w-3.5 text-red-400 shrink-0" />
                         )}
-                        <p className="text-xs font-medium text-white truncate">{result.filename ?? `Page ${idx + 1}`}</p>
+                        <p className={`text-xs font-medium ${isDark ? 'text-white' : 'text-gray-900'} truncate`}>{result.filename ?? `Page ${idx + 1}`}</p>
                       </div>
 
                       {/* Confidence + corrections */}
@@ -936,14 +938,18 @@ export function OcrPage({ onResult }: OcrPageProps) {
                       <Type className="h-3 w-3" />
                       Text Preview
                     </div>
-                    <div className="rounded-lg p-4 bg-white/[0.02] border border-slate-700/40">
+                    <div className={`rounded-lg p-4 border ${
+                      isDark ? 'bg-white/[0.02] border-slate-700/40' : 'bg-gray-50 border-gray-200'
+                    }`}>
                       {isSuccess ? (
-                        <p className="rtl urdu-font text-right leading-relaxed text-sm text-slate-300" dir="rtl" style={{lineHeight:'2.2'}}>
+                        <p className={`rtl urdu-font text-right leading-relaxed text-sm ${
+                          isDark ? 'text-slate-300' : 'text-gray-700'
+                        }`} dir="rtl" style={{lineHeight:'2.2'}}>
                           <span className="line-clamp-[5]">{previewText || (
-                            <span className="text-slate-600 italic">No text detected.</span>
+                            <span className={`${isDark ? 'text-slate-600' : 'text-gray-500'} italic`}>No text detected.</span>
                           )}</span>
                           {(result.full_text || '').length > 120 && (
-                            <span className="text-slate-500 ml-1">...</span>
+                            <span className={`text-slate-500 ml-1`}>...</span>
                           )}
                         </p>
                       ) : (
@@ -954,7 +960,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
                     </div>
 
                     {/* Meta */}
-                    <div className="flex items-center gap-3 text-[10px] text-slate-500 pt-1 px-4 pb-2">
+                    <div className={`flex items-center gap-3 text-[10px] ${isDark ? 'text-slate-500' : 'text-gray-500'} pt-1 px-4 pb-2`}>
                       {isSuccess && (
                         <>
                           <span>{linesCount} lines</span>
@@ -970,16 +976,20 @@ export function OcrPage({ onResult }: OcrPageProps) {
                     <div className="flex justify-center gap-2 px-4 pb-3">
                       <button
                         onClick={() => setExpandedCardIdx(isExpanded ? null : idx)}
-                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-white/[0.03] hover:bg-violet-500/15 hover:text-violet-400 text-slate-500 border border-slate-700/30 transition-all cursor-pointer"
+                        className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium ${
+                          isDark ? 'bg-white/[0.03] hover:bg-violet-500/15 hover:text-violet-400 text-slate-500 border border-slate-700/30' : 'bg-gray-100 hover:bg-violet-50 hover:text-violet-600 text-gray-700 border-gray-200'
+                        } transition-all cursor-pointer`}
                       >
                         {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                         {isExpanded ? 'Collapse' : 'Expand'} Details
                       </button>
                       <button
                         onClick={() => downloadTxt(result)}
-                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-white/[0.03] hover:bg-blue-500/15 hover:text-blue-400 text-slate-500 border border-slate-700/30 transition-all cursor-pointer"
+                        className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium ${
+                          isDark ? 'bg-white/[0.03] hover:bg-blue-500/15 hover:text-blue-400 text-slate-500 border border-slate-700/30' : 'bg-gray-100 hover:bg-blue-50 hover:text-blue-600 text-gray-700 border-gray-200'
+                        } transition-all cursor-pointer`}
                       >
-                        <Download className="h-3.5 w-3.5" /> Download .txt
+                        <Download className="h-3 w-3" /> Download .txt
                       </button>
                     </div>
                   )}
@@ -1011,11 +1021,11 @@ export function OcrPage({ onResult }: OcrPageProps) {
                         {/* Full annotated image */}
                         {(results[expandedCardIdx] as any).annotated_image_b64 && (
                           <div>
-                            <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-1.5">
+                            <h4 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'} mb-3 flex items-center gap-1.5`}>
                               <ImageIcon className="h-4 w-4" />
                               Detected Lines
                             </h4>
-                            <div className="rounded-xl overflow-hidden border border-slate-700/50 bg-slate-800/40">
+                            <div className={`rounded-xl overflow-hidden border ${isDark ? 'border-slate-700/50 bg-slate-800/40' : 'border-slate-300 bg-gray-100/80'}`}>
                               <img
                                 src={`data:image/png;base64,${(results[expandedCardIdx] as any).annotated_image_b64}`}
                                 alt="Annotated"
@@ -1028,20 +1038,24 @@ export function OcrPage({ onResult }: OcrPageProps) {
                         {/* Extracted text */}
                         <div>
                           <div className="flex items-center justify-between mb-3">
-                            <h4 className="text-sm font-semibold text-white flex items-center gap-1.5">
+                            <h4 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'} flex items-center gap-1.5`}>
                               <Type className="h-4 w-4" />
                               Extracted Text
                             </h4>
                             <button
                               onClick={() => copyToClipboard(results[expandedCardIdx]?.full_text ?? '')}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-white/5 hover:bg-white/10 text-slate-300 transition-all cursor-pointer"
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium ${
+                                isDark ? 'bg-white/5 hover:bg-white/10 text-slate-300' : 'bg-gray-100 hover:bg-gray-200 text-slate-700'
+                              } transition-all cursor-pointer`}
                             >
                               <Copy className="h-3 w-3" />
                               Copy
                             </button>
                           </div>
-                          <div className="rounded-xl px-4 py-3 border leading-loose bg-slate-800/50 border-slate-700/60 max-h-[400px] h-[400px] overflow-y-auto">
-                            <p className="rtl urdu-font text-right leading-relaxed text-base" dir="rtl" style={{lineHeight:'2.4', color:'#e2e8f0'}}>
+                          <div className={`rounded-xl px-4 py-3 border leading-loose ${
+                            isDark ? 'bg-slate-800/50 border-slate-700/60' : 'bg-gray-100/80 border-slate-300'
+                          } max-h-[400px] h-[400px] overflow-y-auto`}>
+                            <p className="rtl urdu-font text-right leading-relaxed text-base" dir="rtl" style={{lineHeight:'2.4', color: isDark ? '#e2e8f0' : '#1e293b'}}>
                               {(() => {
                                 const raw = results[expandedCardIdx]?.full_text || 'No text detected.';
                                 if (!correctionHighlights || Object.keys(correctionHighlights).length === 0) return raw;
@@ -1061,7 +1075,7 @@ export function OcrPage({ onResult }: OcrPageProps) {
                                       return <span key={i} className="inline-block">{replacementSpan}</span>;
                                     }
                                   }
-                                  return <span key={i} className="text-slate-300">{ch}</span>;
+                                  return <span key={i} className={`inline-block ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{ch}</span>;
                                 });
                               })()}
                             </p>
@@ -1072,33 +1086,33 @@ export function OcrPage({ onResult }: OcrPageProps) {
                       {/* Per-line results */}
                       {(results[expandedCardIdx] as any)?.lines?.length > 0 && (
                         <div>
-                          <h4 className="text-sm font-semibold text-white mb-3">
+                          <h4 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'} mb-3`}>
                             Per-Line Results{' '}
-                            <span className="font-normal text-sm text-slate-500">
+                            <span className={`font-normal text-sm ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
                               ({(results[expandedCardIdx] as any).lines.length})
                             </span>
                           </h4>
-                          <div className="rounded-xl border border-slate-700/40 max-h-[300px] overflow-y-auto">
+                          <div className={`rounded-xl border ${isDark ? 'border-slate-700/40' : 'border-slate-300'} max-h-[300px] overflow-y-auto`}>
                             <table className="w-full text-sm border-collapse">
                               <thead className="sticky top-0 z-10">
-                                <tr className="bg-[#0f1320]/95 backdrop-blur-sm">
-                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400 border-b border-slate-700/40">#</th>
-                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400 border-b border-slate-700/40">Text (Urdu)</th>
-                                  <th className="py-2 px-4 text-left text-xs font-medium uppercase tracking-wider text-slate-400 border-b border-slate-700/40">Confidence</th>
-                                </tr>
+                              <tr className={`${isDark ? 'bg-[#0f1320]/95 backdrop-blur-sm' : 'bg-gray-100/80'} ${isDark ? '' : 'backdrop-blur-sm'}`}>
+                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400 border-b border-slate-700/40' : 'text-slate-600 border-b border-slate-300'}`}>#</th>
+                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400 border-b border-slate-700/40' : 'text-slate-600 border-b border-slate-300'}`}>Text (Urdu)</th>
+                                <th className={`py-2 px-4 text-left text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400 border-b border-slate-700/40' : 'text-slate-600 border-b border-slate-300'}`}>Confidence</th>
+                              </tr>
                               </thead>
                               <tbody>
-                                {(results[expandedCardIdx] as any).lines.map((line: OcrLine, i: number) => (
-                                  <tr key={i} className="border-t border-slate-800/50 hover:bg-white/[0.02] transition-colors">
-                                    <td className="py-2 px-4 font-mono text-xs align-top text-slate-500">{i + 1}</td>
-                                    <td className="py-2 px-4 rtl urdu-font text-right whitespace-pre-wrap break-words max-w-prose" dir="rtl"><span className="text-slate-200" style={{lineHeight:'2'}}>{line.text}</span></td>
-                                    <td className="py-2 px-4">
-                                      <div className="flex items-center mt-2">
-                                        <Badge variant={confidenceBg(line.confidence).includes('emerald') ? 'success' : confidenceBg(line.confidence).includes('amber') ? 'warning' : 'error'} label={`${Math.round(line.confidence * 100)}%`} />
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
+                              {(results[expandedCardIdx] as any).lines.map((line: OcrLine, i: number) => (
+                                <tr key={i} className={`${isDark ? 'border-t border-slate-800/50 hover:bg-white/[0.02]' : 'border-t border-slate-200 hover:bg-gray-50'} transition-colors`}>
+                                  <td className={`py-2 px-4 font-mono text-xs align-top ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>{i + 1}</td>
+                                  <td className="py-2 px-4 rtl urdu-font text-right whitespace-pre-wrap break-words max-w-prose" dir="rtl"><span className={`${isDark ? 'text-slate-200' : 'text-slate-900'} leading-[2]`}>{line.text}</span></td>
+                                  <td className="py-2 px-4">
+                                    <div className="flex items-center mt-2">
+                                      <Badge variant={confidenceBg(line.confidence).includes('emerald') ? 'success' : confidenceBg(line.confidence).includes('amber') ? 'warning' : 'error'} label={`${Math.round(line.confidence * 100)}%`} />
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
                               </tbody>
                             </table>
                           </div>
@@ -1107,15 +1121,19 @@ export function OcrPage({ onResult }: OcrPageProps) {
 
                       {/* Confidence stats */}
                       <div>
-                        <h4 className="text-sm font-semibold text-white mb-3">Confidence Statistics</h4>
+                        <h4 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'} mb-3`}>Confidence Statistics</h4>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           {statsBars(results[expandedCardIdx]?.confidence_stats ?? { mean: 0, min: 0, max: 0, median: 0 }).map(({ label, value, color }) => (
-                            <div key={label} className="rounded-xl px-3 py-2.5 bg-white/[0.02] border border-slate-700/40">
+                            <div key={label} className={`rounded-xl px-3 py-2.5 ${
+                              isDark ? 'bg-white/[0.02] border border-slate-700/40' : 'bg-gray-100/80 border border-slate-300'
+                            }`}>
                               <div className="flex justify-between text-xs mb-1">
-                                <span className="text-slate-400">{label}</span>
+                                <span className={`${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{label}</span>
                                 <span className={`font-semibold ${confidenceColor(value)}`}>{Math.round(value * 100)}%</span>
                               </div>
-                              <div className="h-1.5 rounded-full overflow-hidden bg-slate-800/80">
+                              <div className={`h-1.5 rounded-full overflow-hidden ${
+                                isDark ? 'bg-slate-800/80' : 'bg-gray-200'
+                              }`}>
                                 <div className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-700`} style={{ width: `${Math.round(value * 100)}%` }} />
                               </div>
                             </div>

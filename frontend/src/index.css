@@ -394,6 +394,7 @@ html:not(.dark) .bg-white\/\[0\.02\] {
 
 /* Border colors */
 html:not(.dark) .border-slate-700,
+html:not(.dark) .border-slate-700\/50,
 html:not(.dark) .border-slate-700\/60,
 html:not(.dark) .border-slate-700\/40 {
   border-color: #cbd5e1 !important;
@@ -419,6 +420,11 @@ html:not(.dark) .text-blue-400 {
 }
 html:not(.dark) .text-amber-400 {
   color: #d97706 !important;
+}
+
+/* Accent background highlights used for corrections — need visible bg in light mode */
+html:not(.dark) .bg-red-500\/15 {
+  background-color: rgba(239, 68, 68, 0.12) !important;
 }
 
 /* Dark overlays */
